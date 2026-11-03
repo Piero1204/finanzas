@@ -1,0 +1,38 @@
+FINANZAS — app para compartir
+=============================
+
+Esta carpeta ES la app. Solo hay que subirla a internet una vez y compartir el enlace.
+
+OPCIÓN FÁCIL: NETLIFY (2 minutos, gratis, sin programar)
+1. Entra a  app.netlify.com/drop
+2. Arrastra esta carpeta completa (o el ZIP) a la página.
+3. Te da un enlace tipo  https://nombre-raro.netlify.app
+   (en "Site settings > Change site name" lo puedes cambiar a algo como  finanzas-familia)
+4. Comparte ese enlace.
+
+OPCIÓN GITHUB PAGES (gratis)
+1. Crea cuenta en github.com y toca "New repository" (público), nombre: finanzas
+2. "uploading an existing file": arrastra TODO el contenido de esta carpeta (incluido .nojekyll) y "Commit changes".
+3. Settings > Pages > Source: "Deploy from a branch" > Branch: main / (root) > Save.
+4. En 1-2 minutos el enlace será  https://TU-USUARIO.github.io/finanzas/
+
+PARA QUIEN LA USA (mamá, hermano)
+1. Abrir el enlace en el celular (Safari en iPhone, Chrome en Android).
+2. iPhone: botón Compartir > "Agregar a pantalla de inicio".
+   Android: menú ⋮ > "Instalar app" / "Agregar a pantalla de inicio".
+3. Abrir la app desde el ícono, crear su PIN. Listo.
+4. Crear sus cuentas en la pestaña "Cuentas".
+5. IMPORTANTE: cada tanto, Más > Copia de seguridad > "Guardar copia ahora" y enviarla a su WhatsApp, correo o Drive.
+
+DATOS Y PRIVACIDAD
+- Los datos se guardan SOLO en el celular de cada persona. Quien publica el enlace no puede verlos.
+- El PIN bloquea la pantalla; no es una caja fuerte contra alguien que tenga el teléfono desbloqueado y sepa de computación.
+- Si pierden el celular o borran los datos del navegador, solo se recupera con la copia de seguridad.
+- Si olvidan el PIN: "Olvidé mi PIN" > restaurar la copia (con PIN nuevo) o empezar de cero.
+- Cambiar de celular: guardar copia en el viejo, abrir el enlace en el nuevo, "Ya tengo una copia de seguridad".
+
+ACTUALIZAR LA APP MÁS ADELANTE
+Vuelve a subir los archivos nuevos al mismo sitio. Al abrir la app dos veces seguidas con internet, se actualiza sola.
+
+EL ASESOR CON IA (opcional)
+Más > Inteligencia artificial: pegar una clave gratuita de Gemini (aistudio.google.com/apikey).
