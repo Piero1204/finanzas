@@ -40,8 +40,14 @@ self.__host = {
   dirty: function () { pendiente = true; },
   fetchSync: function (url, o) {
     const x = new XMLHttpRequest();
+    const cfg = self.APP_CONFIG || {};
+    const bolsa = /^https:\/\/(query[12]\.finance\.yahoo\.com|stooq\.com)\//.test(url);
+    if (bolsa) {
+      if (!cfg.PROXY_URL) throw new Error('La bolsa no está configurada');
+      url = cfg.PROXY_URL + (cfg.PROXY_URL.indexOf('?') === -1 ? '?' : '&') + 'u=' + encodeURIComponent(url);
+    }
     x.open((o.method || 'get').toUpperCase(), url, false);
-    const h = o.headers || {};
+    const h = bolsa ? {} : (o.headers || {});
     Object.keys(h).forEach(function (k) { x.setRequestHeader(k, h[k]); });
     if (o.contentType && !h['Content-Type']) x.setRequestHeader('Content-Type', o.contentType);
     x.send(o.payload === undefined ? null : o.payload);
@@ -49,7 +55,7 @@ self.__host = {
   }
 };
 
-importScripts('shim.js', 'gs-bundle.js', 'prelude.js');
+importScripts('config.js', 'shim.js', 'gs-bundle.js', 'prelude.js');
 
 let listo = abrirDB().then(function () { return idb('readonly', function (s) { return s.get(KEY); }); }).then(function (txt) { if (txt) restaurar(txt); });
 

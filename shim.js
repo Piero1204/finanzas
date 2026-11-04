@@ -139,7 +139,8 @@
   G.Utilities = {
     sleep: function () {},
     formatDate: function (d, tz, f) {
-      return f.replace(/yyyy|MM|dd|HH|mm|ss|H|u/g, function (t) {
+      return f.replace(/'([^']*)'|yyyy|MM|dd|HH|mm|ss|H|u/g, function (t, lit) {
+        if (lit !== undefined) return lit;
         switch (t) {
           case 'yyyy': return String(d.getFullYear()); case 'MM': return p2(d.getMonth() + 1); case 'dd': return p2(d.getDate());
           case 'HH': return p2(d.getHours()); case 'mm': return p2(d.getMinutes()); case 'ss': return p2(d.getSeconds());

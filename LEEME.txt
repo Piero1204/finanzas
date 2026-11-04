@@ -1,0 +1,71 @@
+FINANZAS — app para compartir
+=============================
+
+Esta carpeta ES la app. Se sube a internet una vez y se comparte el enlace. Los pasos A, B y C son para quien publica
+(tú); mamá y tu hermano solo abren el enlace.
+
+─────────────────────────────────────────
+A. PUBLICAR LA APP (obligatorio)
+─────────────────────────────────────────
+Netlify (lo más fácil, 2 minutos, gratis)
+1. Entra a  app.netlify.com/drop  y arrastra esta carpeta completa (o el ZIP).
+2. Te da un enlace tipo  https://nombre-raro.netlify.app  (puedes cambiar el nombre en "Site configuration > Change site name").
+
+GitHub Pages (alternativa gratis)
+1. En github.com crea un repositorio público "finanzas". "uploading an existing file": arrastra TODO el contenido de esta carpeta.
+2. Settings > Pages > Source: "Deploy from a branch" > main / (root) > Save. El enlace será https://TU-USUARIO.github.io/finanzas/
+
+Con eso la app ya funciona: datos en el celular, PIN, copias en archivo, reportes PDF y calendario.
+
+─────────────────────────────────────────
+B. ENTRAR CON GOOGLE (opcional) — copia automática en Drive y hoja de cálculo
+─────────────────────────────────────────
+Solo se hace una vez y es gratis. Necesitas el enlace de tu app del paso A.
+1. Entra a console.cloud.google.com con tu cuenta de Google y crea un proyecto nuevo (nombre: Finanzas).
+2. Menú "APIs y servicios" > "Biblioteca": busca y activa  Google Drive API  y  Google Sheets API.
+3. "APIs y servicios" > "Pantalla de consentimiento de OAuth": tipo "Externo"; pon nombre "Finanzas" y tu correo. En "Permisos"
+   agrega estos tres (todos son de los no sensibles):
+      .../auth/drive.appdata
+      .../auth/drive.file
+      .../auth/userinfo.email
+4. En esa misma pantalla, toca "Publicar la app" (estado "En producción"). Si la dejas en "Prueba", la sesión se vence cada 7 días.
+5. "Credenciales" > "Crear credenciales" > "ID de cliente de OAuth" > tipo "Aplicación web".
+   En "Orígenes autorizados de JavaScript" agrega el enlace de tu app SIN la ruta final, por ejemplo:
+      https://nombre-raro.netlify.app        o        https://TU-USUARIO.github.io
+6. Copia el ID de cliente (termina en .apps.googleusercontent.com) y pégalo en el archivo  config.js  (entre las comillas de GOOGLE_CLIENT_ID).
+7. Vuelve a subir los archivos al mismo sitio (en Netlify: Deploys > arrastrar de nuevo).
+Lo que Google muestra al entrar: que "Finanzas" quiere acceso a su propia carpeta de datos en tu Drive y a crear hojas de cálculo. No lee nada más de tu Drive.
+
+─────────────────────────────────────────
+C. BOLSA (opcional) — precios de acciones y ETF
+─────────────────────────────────────────
+Los sitios de precios no dejan que un celular los consulte directo; hace falta un "puente" gratuito (Cloudflare Workers, 100 mil consultas al día gratis).
+1. Crea cuenta en dash.cloudflare.com > "Workers & Pages" > "Create" > "Create Worker" > nombre "bolsa" > Deploy.
+2. "Edit code": borra lo que hay, pega TODO el contenido del archivo  proxy-bolsa.js  y toca Deploy.
+3. Copia la dirección del Worker (tipo https://bolsa.TU-USUARIO.workers.dev) y pégala en config.js, en PROXY_URL.
+4. Vuelve a subir los archivos. Aparece la pestaña "Bolsa".
+El puente solo reenvía consultas a Yahoo Finance y Stooq.
+
+─────────────────────────────────────────
+PARA QUIEN LA USA (mamá, hermano)
+─────────────────────────────────────────
+1. Abrir el enlace en el celular (Safari en iPhone, Chrome en Android).
+2. iPhone: Compartir > "Agregar a pantalla de inicio".   Android: menú ⋮ > "Instalar app".
+3. Abrir desde el ícono y crear su PIN. Crear sus cuentas en "Cuentas".
+4. En Más > "Cuenta de Google" pueden entrar con Google: sus datos se copian solos a su Drive.
+   Sin Google: Más > Copia de seguridad > "Guardar copia ahora" cada tanto.
+5. Más > Reportes en PDF, y Más > Avisos para agregar sus pagos al calendario del teléfono.
+
+DATOS Y PRIVACIDAD
+- Los datos viven en el celular de cada persona. Quien publica el enlace no puede verlos.
+- Con Google, la copia queda en la carpeta oculta de la app en el Drive de cada persona, no en el tuyo.
+- El PIN bloquea la pantalla; no cifra los datos.
+- Si olvidan el PIN: "Olvidé mi PIN" > restaurar copia (archivo o Google) con PIN nuevo, o empezar de cero.
+- Cambiar de celular: abrir el enlace en el nuevo > "Entrar con Google" o "Ya tengo una copia de seguridad".
+- La hoja de Google que crea la app es solo de lectura en la práctica: se copia desde la app hacia la hoja, no al revés.
+
+ACTUALIZAR LA APP MÁS ADELANTE
+Vuelve a subir los archivos al mismo sitio. Al abrir la app dos veces seguidas con internet, se actualiza sola.
+
+ASESOR CON IA (opcional)
+Más > Inteligencia artificial: cada persona pega su clave gratuita de Gemini (aistudio.google.com/apikey).
