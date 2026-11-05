@@ -967,6 +967,12 @@ async function sRespaldos(){
   icons();
   bind('rsN',e=>hacer(e.currentTarget,()=>api('respaldoAhora',{token:tok()}),'Copia creada ✓',false).then(()=>sRespaldos()).catch(()=>{}));
 }
+function sMigrar(){
+  abrirSheet('Pasar a la app local','<div class="note">Descarga un archivo con todos tus datos. Luego, en la app local, elige «Ya tengo una copia de seguridad» y súbelo. Después usa cada app por separado: los cambios no se sincronizan entre ellas.</div><button class="btn" id="mgB" style="margin-top:0">Descargar mis datos</button>');
+  bind('mgB',e=>hacer(e.currentTarget,()=>api('exportarParaLocal',{}),null,false).then(r=>{
+    try{const u=URL.createObjectURL(new Blob([r.json],{type:'application/json'}));const a=document.createElement('a');a.href=u;a.download=r.nombre;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),2000);toast('Archivo listo ✓')}catch(x){toast('Tu navegador bloqueó la descarga.',true)}
+    e.target.disabled=false}).catch(()=>{}));
+}
 function sExportar(){
   const y=(pd(S.d.hoy)||new Date()).getFullYear();
   abrirSheet('Exportar movimientos','<div class="note">CSV con tus movimientos del periodo.</div><div class="two"><div><label style="margin-top:0">Desde</label><input id="exD" type="date" value="'+y+'-01-01"></div><div><label style="margin-top:0">Hasta</label><input id="exH" type="date" value="'+hoyISO()+'"></div></div><button class="btn" id="exB">Descargar archivo</button>');
@@ -1418,7 +1424,7 @@ function vMas(){
 }
 function postMas(){document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>abrirMas(b.dataset.m))}
 function abrirMas(k){
-  const f={exportar:sExportar,copia:sCopiaLocal,pdf:sReportePDF,avisos:sAvisos,google:sGoogle,ia:()=>sClaveIA(),pin:sCambiarPin,pagos:()=>sPagos(),plan:()=>sPlan(),metas:()=>sMetas(),presupuestos:()=>crudPresupuestos(),categorias:sCategorias,reglas:()=>crudReglas(),asesor:()=>sAsesor(),objetivos:formObjetivos,ajustes:sAjustes,reporte:sReporte,estado:sEstado,tema:cambiarTema}[k];
+  const f={migrar:sMigrar,exportar:sExportar,copia:sCopiaLocal,pdf:sReportePDF,avisos:sAvisos,google:sGoogle,ia:()=>sClaveIA(),pin:sCambiarPin,pagos:()=>sPagos(),plan:()=>sPlan(),metas:()=>sMetas(),presupuestos:()=>crudPresupuestos(),categorias:sCategorias,reglas:()=>crudReglas(),asesor:()=>sAsesor(),objetivos:formObjetivos,ajustes:sAjustes,reporte:sReporte,estado:sEstado,tema:cambiarTema}[k];
   if(f)f();
 }
 
@@ -1787,7 +1793,7 @@ function avisoCopia(){
 const render0=render;
 render=function(){render0();if(S.tab==='inicio')avisoCopia()};
 const iniciar0=iniciar;
-iniciar=async function(){try{await LOCALAPI('tareas',{})}catch(e){}return iniciar0()};
+iniciar=async function(){try{await LOCALAPI('tareas',{})}catch(e){}let r='';try{r=await gProcesarRetorno()}catch(e){}await iniciar0();if(r==='restaurar')restaurarDesdeGoogle()};
 
 /* ================= ARCHIVOS, REPORTES PDF ================= */
 async function entregarArchivo(file){
@@ -1901,25 +1907,83 @@ async function avisarAlAbrir(forzar){
 const GSCOPE='https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email';
 const G={tok:'',exp:0,timer:null,subiendo:false};
 const gId=()=>((window.APP_CONFIG||{}).GOOGLE_CLIENT_ID||'').trim();
+const gBase=()=>(((window.APP_CONFIG||{}).PROXY_URL||'').trim().replace(/\/+$/,''));
 const gOn=()=>localStorage.getItem('gOn')==='1';
+const gSucio=()=>localStorage.getItem('gDirty')==='1';
+const standalone=()=>{try{return window.navigator.standalone===true||matchMedia('(display-mode: standalone)').matches}catch(e){return false}};
+const gRedirectUri=()=>location.origin+location.pathname;
 function cargarGIS(){return new Promise((ok,no)=>{if(window.google&&google.accounts&&google.accounts.oauth2)return ok();const s=document.createElement('script');s.src='https://accounts.google.com/gsi/client';s.onload=()=>ok();s.onerror=()=>no(new Error('No hay conexión con Google. Revisa tu internet.'));document.head.appendChild(s)})}
-function gToken(interactivo){
+/* con el puente (Cloudflare) la sesión se renueva sola para siempre; sin él, dura 1 hora */
+async function gPuente(ruta,cuerpo){
+  const r=await fetch(gBase()+'/google/'+ruta,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cuerpo)});
+  let j={};try{j=await r.json()}catch(e){}
+  if(!r.ok||j.error)throw Object.assign(new Error(j.error_description||j.error||('El puente respondió '+r.status)),{codigo:j.error||''});
+  return j
+}
+function gGuardarTokens(j){
+  G.tok=j.access_token;G.exp=Date.now()+(j.expires_in||3600)*1000;
+  if(j.refresh_token)localStorage.setItem('gRT',j.refresh_token)
+}
+async function gRenovar(){
+  const rt=localStorage.getItem('gRT');if(!rt||!gBase())return false;
+  try{gGuardarTokens(await gPuente('refresh',{refresh_token:rt}));return true}
+  catch(e){if(/invalid_grant/.test(e.codigo||e.message)){localStorage.removeItem('gRT')}throw e}
+}
+function gTokenImplicito(interactivo){
   return new Promise((ok,no)=>{
-    if(!gId()){no(new Error('Falta configurar el ID de cliente de Google (ver LEEME).'));return}
-    if(G.tok&&Date.now()<G.exp-60000){ok(G.tok);return}
     cargarGIS().then(()=>{
       const c=google.accounts.oauth2.initTokenClient({client_id:gId(),scope:GSCOPE,
         callback:r=>{if(r.error){no(new Error(r.error_description||r.error));return}G.tok=r.access_token;G.exp=Date.now()+(r.expires_in||3600)*1000;ok(G.tok)},
-        error_callback:e=>no(new Error(e&&e.type==='popup_closed'?'Cerraste la ventana de Google.':'No se pudo conectar con Google.'))});
+        error_callback:e=>no(Object.assign(new Error(e&&e.type==='popup_closed'?'Cerraste la ventana de Google.':'No se pudo conectar con Google.'),{silencioso:true}))});
       c.requestAccessToken({prompt:interactivo?'':'none'})
     }).catch(no)
   })
 }
+function gCodigoPopup(){
+  return new Promise((ok,no)=>{
+    cargarGIS().then(()=>{
+      const c=google.accounts.oauth2.initCodeClient({client_id:gId(),scope:GSCOPE,ux_mode:'popup',
+        callback:async r=>{if(r.error){no(new Error(r.error_description||r.error));return}try{gGuardarTokens(await gPuente('code',{code:r.code,redirect_uri:'postmessage'}));ok()}catch(e){no(e)}},
+        error_callback:e=>no(new Error(e&&e.type==='popup_closed'?'Cerraste la ventana de Google.':'No se pudo abrir la ventana de Google. Si estás en la app instalada, intenta otra vez.'))});
+      c.requestCode()
+    }).catch(no)
+  })
+}
+/* en la app instalada (pantalla de inicio) las ventanas emergentes fallan: se usa redirección completa */
+function gIrARedirect(intencion){
+  const estado=Math.random().toString(36).slice(2);
+  sessionStorage.setItem('gEstado',estado);sessionStorage.setItem('gIntencion',intencion||'conectar');
+  const p=new URLSearchParams({client_id:gId(),redirect_uri:gRedirectUri(),response_type:'code',scope:GSCOPE,access_type:'offline',prompt:'consent',state:estado,include_granted_scopes:'true'});
+  location.href='https://accounts.google.com/o/oauth2/v2/auth?'+p.toString()
+}
+async function gProcesarRetorno(){
+  const q=new URLSearchParams(location.search);
+  if(!q.get('code')&&!q.get('error'))return '';
+  const est=sessionStorage.getItem('gEstado'),inten=sessionStorage.getItem('gIntencion')||'conectar';
+  history.replaceState(null,'',location.pathname);
+  sessionStorage.removeItem('gEstado');sessionStorage.removeItem('gIntencion');
+  if(q.get('error')){toast('Google canceló la conexión.',true);return ''}
+  if(!est||q.get('state')!==est)return '';
+  try{gGuardarTokens(await gPuente('code',{code:q.get('code'),redirect_uri:gRedirectUri()}));await gEmail();localStorage.setItem('gOn','1');if(inten!=='restaurar')localStorage.setItem('gDirty','1');return inten}
+  catch(e){toast(e.message,true);return ''}
+}
+async function gToken(interactivo,intencion){
+  if(!gId())throw new Error('Falta configurar el ID de cliente de Google (ver LEEME).');
+  if(G.tok&&Date.now()<G.exp-60000)return G.tok;
+  if(gBase()){
+    try{if(await gRenovar())return G.tok}catch(e){if(!interactivo)throw Object.assign(new Error('Vuelve a conectar tu cuenta de Google.'),{silencioso:true,reconectar:true})}
+    if(!interactivo)throw Object.assign(new Error('Vuelve a conectar tu cuenta de Google.'),{silencioso:true,reconectar:true});
+    if(standalone()){gIrARedirect(intencion);return new Promise(()=>{})}
+    await gCodigoPopup();return G.tok
+  }
+  return gTokenImplicito(interactivo)
+}
 async function gFetch(url,opt,interactivo){
-  const t=await gToken(interactivo);
-  opt=opt||{};opt.headers=Object.assign({Authorization:'Bearer '+t},opt.headers||{});
-  const r=await fetch(url,opt);
-  if(r.status===401){G.tok='';throw new Error('Tu sesión de Google venció. Vuelve a conectar.')}
+  let t=await gToken(interactivo);
+  opt=opt||{};
+  const hacer1=async()=>{opt.headers=Object.assign({},opt.headers||{},{Authorization:'Bearer '+G.tok});return fetch(url,opt)};
+  let r=await hacer1();
+  if(r.status===401){G.tok='';await gToken(interactivo);r=await hacer1()}
   if(!r.ok){let m='';try{m=(await r.json()).error.message}catch(e){}throw new Error('Google respondió '+r.status+(m?': '+m:''))}
   return r
 }
@@ -1932,47 +1996,79 @@ async function gBuscarCopia(){
 async function gSubir(){
   const txt=await LOCALAPI('exportar',{});
   const f=await gBuscarCopia();
-  if(f){await gFetch('https://www.googleapis.com/upload/drive/v3/files/'+f.id+'?uploadType=media',{method:'PATCH',headers:{'Content-Type':'application/json'},body:txt})}
+  let r;
+  if(f){r=await gFetch('https://www.googleapis.com/upload/drive/v3/files/'+f.id+'?uploadType=media&fields=id,modifiedTime',{method:'PATCH',headers:{'Content-Type':'application/json'},body:txt})}
   else{
     const b='fin'+Date.now(),cuerpo='--'+b+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify({name:NOMBRE_COPIA,parents:['appDataFolder']})+'\r\n--'+b+'\r\nContent-Type: application/json\r\n\r\n'+txt+'\r\n--'+b+'--';
-    await gFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',{method:'POST',headers:{'Content-Type':'multipart/related; boundary='+b},body:cuerpo})
+    r=await gFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,modifiedTime',{method:'POST',headers:{'Content-Type':'multipart/related; boundary='+b},body:cuerpo})
   }
-  localStorage.setItem('gUlt',String(Date.now()));
+  let j={};try{j=await r.json()}catch(e){}
+  if(j.modifiedTime)localStorage.setItem('gRemoteMod',j.modifiedTime);
+  localStorage.setItem('gUlt',String(Date.now()));localStorage.removeItem('gDirty');
 }
 async function gBajar(){
   const f=await gBuscarCopia();if(!f)return null;
   const r=await gFetch('https://www.googleapis.com/drive/v3/files/'+f.id+'?alt=media');
   return {txt:await r.text(),fecha:f.modifiedTime}
 }
+async function gAplicarNube(b){
+  await LOCALAPI('importar',{json:b.txt,pin:''});
+  localStorage.setItem('gRemoteMod',b.fecha||'');localStorage.setItem('gUlt',String(Date.now()));localStorage.removeItem('gDirty');
+  TOKEN='';location.reload()
+}
+/* ¿otro dispositivo guardó algo nuevo? Si aquí no hay cambios pendientes se carga solo; si hay, se pregunta */
+async function gRevisarNube(sinPreguntar){
+  const f=await gBuscarCopia();if(!f)return 'vacia';
+  const ref=localStorage.getItem('gRemoteMod')||'';
+  if(!ref||f.modifiedTime===ref)return 'igual';
+  if(!gSucio()){const b=await gBajar();if(b)await gAplicarNube(b);return 'cargada'}
+  if(sinPreguntar)return 'conflicto';
+  if(confirm('Otro dispositivo guardó cambios y aquí también tienes cambios sin subir.\n\nAceptar = quedarte con los de la nube (se pierden los de este teléfono)\nCancelar = quedarte con los de este teléfono (se reemplazan los de la nube)')){const b=await gBajar();if(b)await gAplicarNube(b);return 'cargada'}
+  localStorage.setItem('gRemoteMod',f.modifiedTime);return 'local'
+}
 const ESCRIBE=/^(registrar|editar|eliminar|guardar|crear|cobrar|pagar|traspaso|cambioDivisa|ajustar|operacion|realizar|cancelar|asignar|compra|mover|devolver|cerrar|renombrar|configurar)/;
+function gAviso(){
+  const w=document.getElementById('gAv');const hace=gOn()&&gId()&&localStorage.getItem('gNecesita')==='1';
+  if(!hace){if(w)w.remove();return}
+  if(w||!S.d||S.tab!=='inicio')return;
+  const c=document.querySelector('.wrap');if(!c)return;
+  const n=document.createElement('div');n.id='gAv';n.className='note warn tap';n.style.cssText='margin:6px 0 12px;cursor:pointer';
+  n.textContent='Google necesita reconectarse para guardar tus cambios. Toca aquí.';
+  n.onclick=()=>gToken(true).then(()=>{localStorage.removeItem('gNecesita');gAviso();gSincronizar()}).catch(x=>toast(x.message,true));
+  c.insertBefore(n,c.children[1]||null)
+}
 function gProgramar(){
   if(!gOn()||!gId())return;
-  clearTimeout(G.timer);G.timer=setTimeout(gSincronizar,15000)
+  localStorage.setItem('gDirty','1');
+  clearTimeout(G.timer);G.timer=setTimeout(()=>gSincronizar(true),8000)
 }
 async function gSincronizar(silencioso){
   if(!gOn()||G.subiendo)return;G.subiendo=true;
-  try{await gSubir();if(localStorage.getItem('gHojaAuto')==='1')await gActualizarHoja();localStorage.removeItem('gError')}
-  catch(e){try{localStorage.setItem('gError',e.message)}catch(x){}if(!silencioso)toast(e.message,true)}
-  finally{G.subiendo=false}
+  try{
+    const e=await gRevisarNube(true);
+    if(e==='conflicto'){await gRevisarNube(false)}
+    if(gSucio()||e==='vacia'||e==='local'||!localStorage.getItem('gUlt')){await gSubir();if(localStorage.getItem('gHojaAuto')==='1')await gActualizarHoja()}
+    localStorage.removeItem('gError');localStorage.removeItem('gNecesita')
+  }catch(e){
+    if(e&&e.reconectar)localStorage.setItem('gNecesita','1');
+    try{localStorage.setItem('gError',e.message)}catch(x){}
+    if(!silencioso&&!(e&&e.silencioso))toast(e.message,true)
+  }
+  finally{G.subiendo=false;gAviso()}
 }
 const api0=api;
 api=function(n,a){return api0(n,a).then(r=>{if(ESCRIBE.test(n))gProgramar();return r})};
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&G.timer){clearTimeout(G.timer);G.timer=null;gSincronizar(true)}});
+document.addEventListener('visibilitychange',()=>{
+  if(document.hidden){if(G.timer){clearTimeout(G.timer);G.timer=null;gSincronizar(true)}}
+  else if(gOn()&&gId()&&TOKEN&&!sheetOn()){gSincronizar(true)}
+});
+window.addEventListener('online',()=>{if(gSucio())gSincronizar(true)});
 async function gAlAbrir(){
   if(!gOn()||!gId())return;
-  try{
-    const f=await gBuscarCopia();
-    if(!f){gSincronizar(true);return}
-    const ult=Number(localStorage.getItem('gUlt')||0);
-    if(new Date(f.modifiedTime).getTime()>ult+60000){
-      if(confirm('Hay datos más recientes guardados en tu cuenta de Google (de otro teléfono o de otra sesión). ¿Cargarlos aquí? Se reemplazará lo de este teléfono.')){
-        const b=await gBajar();await LOCALAPI('importar',{json:b.txt,pin:''});localStorage.setItem('gUlt',String(Date.now()));TOKEN='';location.reload()
-      }else localStorage.setItem('gUlt',String(Date.now()))
-    }
-  }catch(e){}
+  await gSincronizar(true)
 }
 async function gConectar(){
-  await gToken(true);const em=await gEmail();localStorage.setItem('gOn','1');return em
+  await gToken(true,'conectar');const em=await gEmail();localStorage.setItem('gOn','1');localStorage.setItem('gDirty','1');return em
 }
 async function gActualizarHoja(){
   const datos=await api('datosHoja',{});
@@ -2000,29 +2096,29 @@ function sGoogle(){
     bind('gCon',e=>{e.currentTarget.disabled=true;gConectar().then(async()=>{await gSincronizar();sGoogle()}).catch(x=>{toast(x.message,true);e.currentTarget.disabled=false})});return
   }
   const err=localStorage.getItem('gError');
-  abrirSheet('Cuenta de Google','<div class="row2"><div class="mid"><b>'+esc(localStorage.getItem('gEmail')||'Conectado')+'</b><small>Última copia en Drive: '+cuandoTxt('gUlt')+'</small></div></div>'+(err?'<div class="note warn">'+esc(err)+'</div>':'')
+  abrirSheet('Cuenta de Google',(gBase()?'':'<div class="note warn">Sin el puente de Cloudflare configurado, Google se reconecta cada hora. Ver paso C del LEEME.</div>')+'<div class="row2"><div class="mid"><b>'+esc(localStorage.getItem('gEmail')||'Conectado')+'</b><small>Última copia en Drive: '+cuandoTxt('gUlt')+'</small></div></div>'+(err?'<div class="note warn">'+esc(err)+'</div>':'')
    +'<button class="btn" id="gSync">Guardar copia en Drive ahora</button><button class="btn sec" id="gBaj">Cargar la copia de Drive</button>'
    +'<div class="bn" style="margin:16px 0 4px">Hoja de cálculo</div><div class="note">Crea en tu Drive una hoja de Google con tus movimientos, cuentas y demás datos. Solo se copia desde la app hacia la hoja; lo que edites allí no vuelve a la app.</div>'
    +'<button class="btn sec" id="gHoja" style="margin-top:0">Crear o actualizar mi hoja</button><div style="padding:12px 0 0">'+sw('gAuto','Mantenerla actualizada sola',localStorage.getItem('gHojaAuto')==='1')+'</div><div class="bn">Última vez: '+cuandoTxt('gHojaUlt')+'</div>'
    +'<button class="btn sec" id="gOff" style="margin-top:18px">Desconectar Google</button>');
-  bind('gSync',e=>{e.currentTarget.disabled=true;gSubir().then(()=>{localStorage.removeItem('gError');toast('Copia guardada ✓');sGoogle()}).catch(x=>{toast(x.message,true);e.currentTarget.disabled=false})});
-  bind('gBaj',async()=>{try{const b=await gBajar();if(!b){toast('Aún no hay copia en tu Drive.',true);return}if(!confirm('Se reemplazará TODO lo de este teléfono por la copia de Drive ('+new Date(b.fecha).toLocaleString('es-PE')+'). ¿Continuar?'))return;await LOCALAPI('importar',{json:b.txt,pin:''});localStorage.setItem('gUlt',String(Date.now()));TOKEN='';location.reload()}catch(x){toast(x.message,true)}});
+  bind('gSync',e=>{e.currentTarget.disabled=true;gRevisarNube(false).then(()=>gSubir()).then(()=>{localStorage.removeItem('gError');toast('Copia guardada ✓');sGoogle()}).catch(x=>{toast(x.message,true);e.currentTarget.disabled=false})});
+  bind('gBaj',async()=>{try{const b=await gBajar();if(!b){toast('Aún no hay copia en tu Drive.',true);return}if(!confirm('Se reemplazará TODO lo de este teléfono por la copia de Drive ('+new Date(b.fecha).toLocaleString('es-PE')+'). ¿Continuar?'))return;await gAplicarNube(b)}catch(x){toast(x.message,true)}});
   bind('gHoja',e=>{e.currentTarget.disabled=true;gActualizarHoja().then(u=>{toast('Hoja lista ✓');window.open(u,'_blank');sGoogle()}).catch(x=>{toast(x.message,true);e.currentTarget.disabled=false})});
   const a=document.getElementById('gAuto');if(a)a.onchange=()=>localStorage.setItem('gHojaAuto',a.checked?'1':'0');
-  bind('gOff',()=>{if(!confirm('¿Desconectar Google? Tu copia en Drive no se borra.'))return;try{if(G.tok&&window.google&&google.accounts)google.accounts.oauth2.revoke(G.tok)}catch(e){}G.tok='';['gOn','gEmail','gHojaAuto'].forEach(k=>localStorage.removeItem(k));cerrarSheet(true)})
+  bind('gOff',()=>{if(!confirm('¿Desconectar Google? Tu copia en Drive no se borra.'))return;try{if(G.tok&&window.google&&google.accounts)google.accounts.oauth2.revoke(G.tok)}catch(e){}G.tok='';['gOn','gEmail','gHojaAuto','gRT','gRemoteMod','gDirty','gNecesita'].forEach(k=>localStorage.removeItem(k));cerrarSheet(true)})
 }
 /* entrar con Google al instalar en otro teléfono */
 async function restaurarDesdeGoogle(){
   try{
-    await gToken(true);await gEmail();
+    await gToken(true,'restaurar');await gEmail();
     const b=await gBajar();
     if(!b){toast('No hay copia en esa cuenta de Google. Crea tu PIN para empezar de cero.',true);localStorage.setItem('gOn','1');return}
     const pin=prompt('Se encontró tu copia. Crea un PIN para esta app (4 a 8 números):')||'';if(!pin)return;
-    await LOCALAPI('importar',{json:b.txt,pin});localStorage.setItem('gOn','1');localStorage.setItem('gUlt',String(Date.now()));alert('Datos recuperados ✓');location.reload()
+    await LOCALAPI('importar',{json:b.txt,pin});localStorage.setItem('gOn','1');localStorage.setItem('gRemoteMod',b.fecha||'');localStorage.setItem('gUlt',String(Date.now()));localStorage.removeItem('gDirty');alert('Datos recuperados ✓');location.reload()
   }catch(x){toast(x.message,true)}
 }
 const cargar0=cargar;
-cargar=async function(s){await cargar0(s);if(!cargar.vez){cargar.vez=1;gAlAbrir();avisarAlAbrir()}};
+cargar=async function(s){await cargar0(s);gAviso();if(!cargar.vez){cargar.vez=1;gAlAbrir();avisarAlAbrir()}};
 if(!(window.APP_CONFIG&&APP_CONFIG.PROXY_URL)){const i=TABS.findIndex(t=>t[0]==='inversiones');if(i>=0)TABS.splice(i,1)}
 
 /* arranque */

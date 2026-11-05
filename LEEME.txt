@@ -30,21 +30,35 @@ Solo se hace una vez y es gratis. Necesitas el enlace de tu app del paso A.
       .../auth/userinfo.email
 4. En esa misma pantalla, toca "Publicar la app" (estado "En producción"). Si la dejas en "Prueba", la sesión se vence cada 7 días.
 5. "Credenciales" > "Crear credenciales" > "ID de cliente de OAuth" > tipo "Aplicación web".
-   En "Orígenes autorizados de JavaScript" agrega el enlace de tu app SIN la ruta final, por ejemplo:
-      https://nombre-raro.netlify.app        o        https://TU-USUARIO.github.io
-6. Copia el ID de cliente (termina en .apps.googleusercontent.com) y pégalo en el archivo  config.js  (entre las comillas de GOOGLE_CLIENT_ID).
-7. Vuelve a subir los archivos al mismo sitio (en Netlify: Deploys > arrastrar de nuevo).
-Lo que Google muestra al entrar: que "Finanzas" quiere acceso a su propia carpeta de datos en tu Drive y a crear hojas de cálculo. No lee nada más de tu Drive.
+   - "Orígenes autorizados de JavaScript": el enlace de tu app SIN la ruta final, por ejemplo
+         https://nombre-raro.netlify.app        o        https://TU-USUARIO.github.io
+   - "URI de redireccionamiento autorizados": el enlace COMPLETO de tu app, con la barra final, por ejemplo
+         https://nombre-raro.netlify.app/       o        https://TU-USUARIO.github.io/finanzas/
+6. Copia el ID de cliente (termina en .apps.googleusercontent.com) y pégalo en config.js (GOOGLE_CLIENT_ID).
+   Anota también la "Clave secreta del cliente": se usa en el paso C (NO la pegues en config.js).
+7. Vuelve a subir los archivos al mismo sitio.
 
 ─────────────────────────────────────────
-C. BOLSA (opcional) — precios de acciones y ETF
+C. PUENTE GRATUITO (Cloudflare): sesión de Google permanente + bolsa
 ─────────────────────────────────────────
-Los sitios de precios no dejan que un celular los consulte directo; hace falta un "puente" gratuito (Cloudflare Workers, 100 mil consultas al día gratis).
-1. Crea cuenta en dash.cloudflare.com > "Workers & Pages" > "Create" > "Create Worker" > nombre "bolsa" > Deploy.
-2. "Edit code": borra lo que hay, pega TODO el contenido del archivo  proxy-bolsa.js  y toca Deploy.
-3. Copia la dirección del Worker (tipo https://bolsa.TU-USUARIO.workers.dev) y pégala en config.js, en PROXY_URL.
-4. Vuelve a subir los archivos. Aparece la pestaña "Bolsa".
-El puente solo reenvía consultas a Yahoo Finance y Stooq.
+Sin este paso, Google te pide volver a conectar cada hora y a veces falla en el celular. Con él, entras una vez y queda
+conectado en todos tus dispositivos. También habilita los precios de la bolsa.
+1. Crea cuenta en dash.cloudflare.com > "Workers & Pages" > "Create" > "Create Worker" > nombre "finanzas" > Deploy.
+2. "Edit code": borra lo que hay, pega TODO el contenido del archivo  worker-cloudflare.js  y toca Deploy.
+3. En el Worker: "Settings" > "Variables and Secrets" > agrega (tipo Text, y Secret para la clave):
+      GOOGLE_CLIENT_ID       (Text)    tu ID de cliente de Google
+      GOOGLE_CLIENT_SECRET   (Secret)  la clave secreta del paso B.6
+      ALLOWED_ORIGIN         (Text)    la dirección de tu app sin barra final, ej: https://TU-USUARIO.github.io
+   y toca Deploy otra vez.
+4. Copia la dirección del Worker (tipo https://finanzas.TU-USUARIO.workers.dev) y pégala en config.js, en PROXY_URL.
+5. Vuelve a subir los archivos. Aparece la pestaña "Bolsa" y Google ya no se desconecta.
+Si ya habías conectado Google antes de este paso: en la app, Más > Cuenta de Google > Desconectar, y vuelve a conectar.
+Si Google no te muestra de nuevo la pantalla de permisos, quita el acceso en myaccount.google.com/permissions y conecta otra vez.
+
+SINCRONIZACIÓN ENTRE DISPOSITIVOS
+- Cada cambio se guarda en tu Drive a los pocos segundos. Al abrir la app o volver a ella, trae lo último que subió otro dispositivo.
+- Si cambias algo sin internet y otro dispositivo también cambió algo, la app te pregunta con cuál quedarte (no mezcla los dos).
+- Lo más seguro: usa un dispositivo a la vez y espera a ver el cambio guardado antes de abrir otro.
 
 ─────────────────────────────────────────
 PARA QUIEN LA USA (mamá, hermano)
