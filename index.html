@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<meta name="google-site-verification" content="hGpr7bTUDgTn1CUweAmp6rq4TzAYGXiPFI2kijA3b6M" />
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
@@ -1420,12 +1419,12 @@ function vMas(){
   h+='<div class="card menu"><h3>Asesor</h3>'+it('asesor','message-circle','Asesor financiero','Pregunta antes de comprar, endeudarte o invertir')+'</div>';
   h+='<div class="card menu"><h3>Planificación</h3>'+it('plan','pie-chart','Plan del mes','Reparto, presupuestos y lo que te queda')+it('metas','target','Metas','Ingresos y ahorro')+it('pagos','calendar-clock','Pagos','Programados, recurrentes y puntualidad')+'</div>';
   h+='<div class="card menu"><h3>Orden</h3>'+it('categorias','tags','Categorías','Subcategorías y tipo de ingreso')+it('reglas','wand-sparkles','Reglas automáticas','Clasifican tus gastos por palabra clave')+it('ajustes','sliders-horizontal','Predeterminados','Medio de pago y cuenta')+'</div>';
-  h+='<div class="card menu"><h3>Sistema</h3>'+it('copia','database-backup','Copia de seguridad','Guarda o restaura tus datos')+it('exportar','file-spreadsheet','Exportar movimientos','Archivo CSV')+it('ia','sparkles','Inteligencia artificial','Clave gratuita de Gemini para el asesor')+it('pdf','file-text','Reportes en PDF','Mensual o anual, para guardar o compartir')+it('avisos','bell','Avisos','Calendario y recordatorios')+it('google','cloud','Cuenta de Google','Copia automática en Drive y hoja de cálculo')+it('pin','lock','Cambiar PIN','')+it('tema','sun-moon','Tema','Claro u oscuro')+'</div>';
+  h+='<div class="card menu"><h3>Sistema</h3>'+it('copia','database-backup','Copia de seguridad','Guarda o restaura tus datos')+it('exportar','file-spreadsheet','Exportar movimientos','Archivo CSV')+it('ia','sparkles','Inteligencia artificial','Clave gratuita de Gemini para el asesor')+it('pdf','file-text','Reportes en PDF','Mensual o anual, para guardar o compartir')+it('avisos','bell','Avisos','Calendario y recordatorios')+it('hoja','table','Conectar con mi hoja','Sincroniza con tu Google Sheets y Telegram')+it('google','cloud','Cuenta de Google','Copia automática en Drive y hoja de cálculo')+it('pin','lock','Cambiar PIN','')+it('tema','sun-moon','Tema','Claro u oscuro')+'</div>';
   return h;
 }
 function postMas(){document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>abrirMas(b.dataset.m))}
 function abrirMas(k){
-  const f={migrar:sMigrar,exportar:sExportar,copia:sCopiaLocal,pdf:sReportePDF,avisos:sAvisos,google:sGoogle,ia:()=>sClaveIA(),pin:sCambiarPin,pagos:()=>sPagos(),plan:()=>sPlan(),metas:()=>sMetas(),presupuestos:()=>crudPresupuestos(),categorias:sCategorias,reglas:()=>crudReglas(),asesor:()=>sAsesor(),objetivos:formObjetivos,ajustes:sAjustes,reporte:sReporte,estado:sEstado,tema:cambiarTema}[k];
+  const f={migrar:sMigrar,exportar:sExportar,copia:sCopiaLocal,pdf:sReportePDF,avisos:sAvisos,hoja:sHoja,google:sGoogle,ia:()=>sClaveIA(),pin:sCambiarPin,pagos:()=>sPagos(),plan:()=>sPlan(),metas:()=>sMetas(),presupuestos:()=>crudPresupuestos(),categorias:sCategorias,reglas:()=>crudReglas(),asesor:()=>sAsesor(),objetivos:formObjetivos,ajustes:sAjustes,reporte:sReporte,estado:sEstado,tema:cambiarTema}[k];
   if(f)f();
 }
 
@@ -1794,7 +1793,7 @@ function avisoCopia(){
 const render0=render;
 render=function(){render0();if(S.tab==='inicio')avisoCopia()};
 const iniciar0=iniciar;
-iniciar=async function(){try{await LOCALAPI('tareas',{})}catch(e){}let r='';try{r=await gProcesarRetorno()}catch(e){}await iniciar0();if(r==='restaurar')restaurarDesdeGoogle()};
+iniciar=async function(){if(!hOn())try{await LOCALAPI('tareas',{})}catch(e){}let r='';try{r=await gProcesarRetorno()}catch(e){}await iniciar0();if(r==='restaurar')restaurarDesdeGoogle()};
 
 /* ================= ARCHIVOS, REPORTES PDF ================= */
 async function entregarArchivo(file){
@@ -2058,7 +2057,7 @@ async function gSincronizar(silencioso){
   finally{G.subiendo=false;gAviso()}
 }
 const api0=api;
-api=function(n,a){return api0(n,a).then(r=>{if(ESCRIBE.test(n))gProgramar();return r})};
+api=function(n,a){return api0(n,a).then(r=>{if(ESCRIBE.test(n)){gProgramar();hEncolar(n,a)}return r})};
 document.addEventListener('visibilitychange',()=>{
   if(document.hidden){if(G.timer){clearTimeout(G.timer);G.timer=null;gSincronizar(true)}}
   else if(gOn()&&gId()&&TOKEN&&!sheetOn()){gSincronizar(true)}
@@ -2119,8 +2118,128 @@ async function restaurarDesdeGoogle(){
   }catch(x){toast(x.message,true)}
 }
 const cargar0=cargar;
-cargar=async function(s){await cargar0(s);gAviso();if(!cargar.vez){cargar.vez=1;gAlAbrir();avisarAlAbrir()}};
+cargar=async function(s){await cargar0(s);gAviso();if(!cargar.vez){cargar.vez=1;gAlAbrir();hAlAbrir();avisarAlAbrir()}};
 if(!(window.APP_CONFIG&&APP_CONFIG.PROXY_URL)){const i=TABS.findIndex(t=>t[0]==='inversiones');if(i>=0)TABS.splice(i,1)}
+
+/* ================= MODO HOJA: esta app se sincroniza con tu Google Sheets (y con Telegram) =================
+   La hoja manda. La app lee de su copia local (rápido, también sin internet), envía a la hoja cada cambio que haces
+   (en cola, se reintenta solo) y baja la copia nueva cuando la hoja cambió (por ejemplo, un gasto por Telegram). */
+const H={seq:0,flush:false,pull:false,timer:null};
+function hOn(){return localStorage.getItem('hOn')==='1'&&!!localStorage.getItem('hUrl')}
+function hCola(){try{return JSON.parse(localStorage.getItem('hCola')||'[]')}catch(e){return []}}
+function hGuardarCola(c){sv('hCola',JSON.stringify(c))}
+async function hPeticion(nombre,args,token){
+  const u=localStorage.getItem('hUrl');
+  const ctl=new AbortController(),tm=setTimeout(()=>ctl.abort(),90000);
+  let r;
+  try{r=await fetch(u+(u.indexOf('?')===-1?'?':'&')+'api=1',{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({nombre:nombre,args:args||{},token:token||''}),signal:ctl.signal})}
+  catch(e){const x=new Error('Sin conexión con tu hoja');x.red=true;throw x}
+  finally{clearTimeout(tm)}
+  let j;try{j=await r.json()}catch(e){const x=new Error('Tu hoja no respondió como se esperaba. Revisa la URL y que hayas publicado la nueva versión de la implementación.');x.red=true;throw x}
+  return j
+}
+async function hLogin(){
+  const j=await hPeticion('login',{pin:localStorage.getItem('hPin')||''},'');
+  if(j.__error)throw new Error(j.__error);
+  const t=j.data&&j.data.token;if(!t)throw new Error('No se pudo iniciar sesión en tu hoja.');
+  sv('hTok',t);sv('hTokExp',String(Date.now()+11*3600000));return t
+}
+async function hLlamar(nombre,args){
+  let t=localStorage.getItem('hTok')||'';
+  if(!t||Date.now()>Number(localStorage.getItem('hTokExp')||0))t=await hLogin();
+  let j=await hPeticion(nombre,args,t);
+  if(j.__auth){t=await hLogin();j=await hPeticion(nombre,args,t)}
+  if(j.__error)throw new Error(j.__error);
+  return j.data
+}
+function hEncolar(n,a){
+  if(!hOn())return;
+  H.seq++;
+  const c=hCola();c.push({n:n,a:Object.assign({},a||{},{token:(a&&a.token)||tok()}),t:Date.now()});hGuardarCola(c);
+  clearTimeout(H.timer);H.timer=setTimeout(()=>hSincronizar(),1500)
+}
+/* baja la copia de la hoja si cambió (forzar = sin comparar) */
+async function hTraer(forzar){
+  if(H.pull||hCola().length)return 'ocupado';
+  H.pull=true;
+  try{
+    const seq=H.seq;
+    const v=String(await hLlamar('versionHoja',{}));
+    if(!forzar&&v===localStorage.getItem('hVer')){sv('hUlt',String(Date.now()));return 'igual'}
+    const r=await hLlamar('exportarParaLocal',{});
+    if(H.seq!==seq||hCola().length)return 'ocupado';
+    if(!forzar&&sheetOn())return 'ocupado';
+    await LOCALAPI('importar',{json:r.json,pin:''});
+    sv('hVer',v);sv('hUlt',String(Date.now()));
+    if(S.d&&!sheetOn())await cargar(true);
+    return 'cargada'
+  }finally{H.pull=false}
+}
+/* envía la cola y luego baja lo nuevo */
+async function hSincronizar(manual){
+  if(!hOn()||H.flush)return;H.flush=true;
+  try{
+    let c=hCola();
+    while(c.length){
+      try{await hLlamar(c[0].n,c[0].a);c=hCola();c.shift();hGuardarCola(c)}
+      catch(e){
+        if(e.red)throw e;
+        c=hCola();const x=c.shift();hGuardarCola(c);
+        sv('hErr',(x?x.n+': ':'')+e.message);toast('Un cambio no se pudo enviar a tu hoja: '+e.message,true)
+      }
+      c=hCola()
+    }
+    localStorage.removeItem('hRed');
+    await hTraer(manual===true);
+    if(manual===true)localStorage.removeItem('hErr')
+  }catch(e){
+    if(e&&e.red)sv('hRed','1');else sv('hErr',e.message);
+    if(manual===true)toast(e.message,true)
+  }
+  finally{H.flush=false}
+}
+function hAlAbrir(){if(hOn())hSincronizar()}
+setInterval(()=>{if(hOn()&&!document.hidden&&TOKEN&&!sheetOn())hSincronizar()},90000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&hOn()&&TOKEN)hSincronizar()});
+window.addEventListener('online',()=>{if(hOn())hSincronizar()});
+/* con la hoja conectada la copia automática a Drive se pausa (la hoja manda) */
+const gSincronizar0=gSincronizar;
+gSincronizar=function(s){return hOn()?Promise.resolve():gSincronizar0(s)};
+function sHoja(){
+  if(!hOn()){
+    abrirSheet('Conectar con mi hoja','<div class="note">Solo para ti: sincroniza esta app con tu Google Sheets del sistema original. Lo que registres por Telegram aparece aquí y lo que registres aquí aparece en la hoja. <b>La hoja manda</b>: al conectar, los datos de este dispositivo se reemplazan por los de tu hoja.</div>'
+      +'<label style="margin-top:0">URL de tu aplicación web (termina en /exec)</label><input id="hU" type="url" placeholder="https://script.google.com/macros/s/…/exec" autocapitalize="off" autocorrect="off" spellcheck="false">'
+      +'<label>PIN de tu hoja (el DASHBOARD_PIN)</label><input id="hP" type="password" inputmode="numeric" autocomplete="off">'
+      +'<button class="btn" id="hCon">Conectar</button>');
+    bind('hCon',async e=>{
+      const u=val('hU').trim(),p=val('hP').trim();
+      if(u.indexOf('https://script.google.com/')!==0){toast('La URL debe empezar con https://script.google.com/',true);return}
+      if(!p){toast('Escribe el PIN de tu hoja.',true);return}
+      if(!confirm('Se reemplazarán TODOS los datos de este dispositivo por los de tu hoja. ¿Continuar?'))return;
+      const b=e.currentTarget;b.disabled=true;b.textContent='Conectando…';
+      try{
+        sv('hUrl',u);sv('hPin',p);localStorage.removeItem('hTok');
+        await hLogin();
+        ['hCola','hVer','hErr','hRed'].forEach(k=>localStorage.removeItem(k));
+        sv('hOn','1');
+        await hTraer(true);
+        cerrarSheet();toast('Conectada ✓');cargar(true)
+      }catch(x){
+        ['hOn','hUrl','hPin','hTok','hTokExp'].forEach(k=>localStorage.removeItem(k));toast(x.message,true);b.disabled=false;b.textContent='Conectar'
+      }
+    });
+    return
+  }
+  const n=hCola().length,err=localStorage.getItem('hErr');
+  abrirSheet('Mi hoja','<div class="row2"><div class="mid"><b>Conectada</b><small>Última revisión: '+cuandoTxt('hUlt')+'</small></div></div>'
+    +(n?'<div class="note warn">'+n+' cambio'+(n===1?'':'s')+' por enviar a tu hoja'+(localStorage.getItem('hRed')?' (sin conexión; se reintenta solo)':'')+'.</div>':'')
+    +(err?'<div class="note warn">'+esc(err)+'</div>':'')
+    +(gOn()?'<div class="note">Mientras esta conexión esté activa, la copia automática a Drive queda en pausa: la hoja manda.</div>':'')
+    +'<button class="btn" id="hSy">Sincronizar ahora</button><button class="btn sec" id="hOff">Desconectar</button>');
+  bind('hSy',e=>{e.currentTarget.disabled=true;hSincronizar(true).then(()=>sHoja())});
+  bind('hOff',()=>{if(!confirm('¿Desconectar de tu hoja? Esta app se queda con los datos que tiene ahora y vuelve a funcionar sola.'))return;['hOn','hUrl','hPin','hTok','hTokExp','hCola','hVer','hErr','hRed','hUlt'].forEach(k=>localStorage.removeItem(k));toast('Desconectada');cerrarSheet()})
+}
+
 
 /* arranque */
 window.addEventListener('load',()=>{iniciar()});
