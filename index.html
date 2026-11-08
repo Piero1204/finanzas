@@ -509,7 +509,7 @@ function vInicio(){
     const a=it.a;return '<button class="acc" data-cu="'+esc(a.id)+'"><small><i class="dot" style="background:'+esc(a.color||'var(--ac)')+'"></i>'+esc(a.banco)+'</small><b class="'+(a.saldo<0?'neg':'')+'">'+fm(a.saldo,a.moneda)+'</b><small>'+a.moneda+' · '+esc(a.tipo)+'</small></button>'}).join('')
     +'<button class="acc add" id="btnNuevaCuenta">'+ic('plus')+'</button></div>';
   h+='<div class="qa">'+[['gasto','minus','Gasto'],['ingreso','plus','Ingreso'],['traspaso','arrow-right-left','Traspaso'],['cambio','banknote','Cambio'],['programar','calendar-clock','Programar']].map(q=>'<button data-q="'+q[0]+'"><span class="c">'+ic(q[1])+'</span>'+q[2]+'</button>').join('')+'</div>';
-  h+=hTarjetas()+hProximos()+hPlan()+hMetas()+hFondo()+hResumen()+hInsights()+hRecientes();
+  h+=hTarjetas()+hProximos()+hPlan()+hMetas()+hFondo()+hResumen()+hInsights()+hPerfilCard()+hRecientes();
   return h;
 }
 function iconoCuenta(t){return {Efectivo:'banknote',Banco:'landmark',Ahorros:'piggy-bank',Inversion:'trending-up','Billetera Digital':'smartphone'}[t]||'wallet'}
@@ -597,6 +597,47 @@ function hResumen(){
   h+='<div class="bn" style="margin:16px 0 6px">Evolución del dinero en cuentas</div><div class="cv s"><canvas id="chCap"></canvas></div>';
   return h+'</div>';
 }
+function hPerfilCard(){
+  return '<div class="card" id="cardPerfil"><h3>Tu perfil financiero<button class="chip" id="btnPerfil">'+ic('user-round-search')+' Ver completo</button></h3><div id="perfilBody"><div class="sk" style="height:48px;margin:0"></div></div><button class="btn sec" id="btnAnalista" style="margin-top:10px">'+ic('message-circle')+' Preguntarle al analista</button></div>';
+}
+const NV={ok:'baja',atencion:'media',alerta:'alta',info:''};
+async function cargarPerfilCard(){
+  const b=document.getElementById('perfilBody');if(!b)return;
+  try{
+    const r=await api('perfil',{});const cur=document.getElementById('perfilBody');if(!cur)return;
+    S.perfil=r;
+    cur.innerHTML='<div style="font-size:18px;font-weight:700;margin-bottom:2px">'+esc(r.arquetipo.nombre)+'</div><div class="mut" style="font-size:13.5px;line-height:1.4">'+esc(r.arquetipo.explicacion)+'</div>'+(r.narrativa&&r.narrativa.resumen?'<div style="margin-top:8px;font-size:14px;line-height:1.45">'+esc(r.narrativa.resumen)+'</div>':'');
+  }catch(e){const cur=document.getElementById('perfilBody');if(cur)cur.innerHTML='<div class="empty">No pude armar tu perfil todavía.</div>'}
+}
+async function sPerfil(forzar){
+  const b=abrirSheet('Tu perfil financiero','<div id="pfB"><div class="sk" style="height:120px"></div></div>',{full:true});
+  let r;try{r=await api('perfil',{forzar:!!forzar})}catch(e){if(e.message!=='auth')$('#pfB').innerHTML='<div class="empty">No pude cargar el perfil.</div>';return}
+  S.perfil=r;
+  const li=(a)=>(a||[]).map(x=>'<div class="ins media"><span class="d" style="background:var(--ac)"></span><div><span style="color:var(--tx)">'+esc(x)+'</span></div></div>').join('');
+  let h='<div class="card" style="margin:0 0 12px"><div class="mut" style="font-size:12px;text-transform:uppercase;letter-spacing:.04em">Tu perfil</div><div style="font-size:22px;font-weight:800;margin:2px 0 4px">'+esc(r.arquetipo.nombre)+'</div><div style="font-size:14.5px;line-height:1.45">'+esc(r.arquetipo.explicacion)+'</div>'+(r.arquetipo.reglas&&r.arquetipo.reglas.length?'<div class="bn" style="margin-top:8px">Por qué: '+r.arquetipo.reglas.map(esc).join(' · ')+'</div>':'')+(r.arquetipo.aviso?'<div class="bn">'+esc(r.arquetipo.aviso)+'</div>':'')+'</div>';
+  const n=r.narrativa;
+  if(n){
+    if(n.resumen)h+='<div style="font-size:14.5px;line-height:1.5;margin:0 0 10px">'+esc(n.resumen)+'</div>';
+    if(n.fortalezas&&n.fortalezas.length)h+='<div class="bn" style="margin:10px 0 2px">Fortalezas</div>'+li(n.fortalezas);
+    if(n.debilidades&&n.debilidades.length)h+='<div class="bn" style="margin:10px 0 2px">A mejorar</div>'+li(n.debilidades);
+    if(n.habitos&&n.habitos.length)h+='<div class="bn" style="margin:10px 0 2px">Hábitos que se observan</div>'+li(n.habitos);
+    if(n.siguiente_paso)h+='<div class="note" style="margin-top:10px"><b>Siguiente paso:</b> '+esc(n.siguiente_paso)+'</div>';
+  }else if(!r.iaDisponible)h+='<div class="note">Con la clave de IA (Más → Inteligencia artificial) el perfil además se redacta con tus fortalezas, debilidades y hábitos.</div>';
+  if(r.error)h+='<div class="note warn">La IA no respondió: '+esc(r.error)+'</div>';
+  if(r.indicadores&&r.indicadores.length){
+    h+='<div class="bn" style="margin:14px 0 2px">Indicadores ('+r.mesesAnalizados+' meses completos)</div>';
+    h+=r.indicadores.map((x,i)=>'<div class="ins '+(NV[x.nivel]||'')+' tap" data-ind="'+i+'"><span class="d"></span><div style="flex:1"><b>'+esc(x.titulo)+' · '+esc(String(x.valor))+'</b><span>'+esc(x.texto)+'</span><span class="mut" id="indF'+i+'" style="display:none;font-size:12px;margin-top:2px">Cómo se calcula: '+esc(x.formula)+'</span></div></div>').join('');
+  }
+  if(r.hallazgos&&r.hallazgos.length){
+    h+='<div class="bn" style="margin:14px 0 2px">Descubrimientos para revisar</div>'+r.hallazgos.map(x=>'<div class="ins media"><span class="d"></span><div><span style="color:var(--tx)">'+esc(x.texto)+'</span></div></div>').join('')+'<div class="bn">Son señales para revisar, no prueba de error ni de fraude.</div>';
+  }
+  h+='<button class="btn" id="pfA" style="margin-top:14px">'+ic('message-circle')+' Preguntarle al analista</button><button class="btn sec" id="pfR">'+ic('refresh-cw')+' Actualizar perfil</button>';
+  if(r.generado)h+='<div class="bn">Redactado '+esc(String(r.generado).replace('T',' ').slice(0,16))+' · se guarda 6 horas.</div>';
+  $('#pfB').innerHTML=h;icons();
+  document.querySelectorAll('[data-ind]').forEach(e=>e.onclick=()=>{const f=document.getElementById('indF'+e.dataset.ind);if(f)f.style.display=f.style.display==='none'?'block':'none'});
+  bind('pfA',()=>sAsesor('Haz un diagnóstico completo de mis finanzas: fortalezas, debilidades y qué mejorar primero.'));
+  bind('pfR',()=>sPerfil(true));
+}
 function hInsights(){
   return '<div class="card" id="cardIA"><h3>Recomendaciones<button class="chip" id="btnIAref">'+ic('sparkles')+' Analizar</button></h3><div id="iaBody"><div class="sk" style="height:60px;margin:0"></div></div></div>';
 }
@@ -634,7 +675,8 @@ function postInicio(){
   segBind('segResModo',v=>{S.resModo=v;render()});
   segBind('segResCur',v=>{S.resCur=v;sv('fin_rescur',v);render()});
   graficosResumen();
-  cargarIA(false);
+  bind('btnPerfil',()=>sPerfil());bind('btnAnalista',()=>sAsesor());
+  cargarIA(false);cargarPerfilCard();
 }
 function irMovsPeriodo(moneda){
   const hoy=pd(S.d.hoy)||new Date(),p=n=>String(n).padStart(2,'0'),iso=x=>x.getFullYear()+'-'+p(x.getMonth()+1)+'-'+p(x.getDate());
@@ -1288,13 +1330,13 @@ function formObjetivos(){
 /* ================= asesor (chat) ================= */
 function fmtChat(t){return esc(t).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/^[-•] (.+)$/gm,'• $1').replace(/\n/g,'<br>')}
 function sAsesor0(pregunta){
-  const b=abrirSheet('Asesor financiero','<div id="chL" style="min-height:260px;max-height:55vh;overflow:auto"></div><div class="chips" id="chS" style="margin:8px 0"></div><div style="display:flex;gap:8px"><input id="chI" placeholder="Pregunta: ¿me conviene comprar…?" autocomplete="off" style="flex:1"><button class="btn" id="chB" style="margin:0;width:auto;padding:0 18px">'+ic('send')+'</button></div><div class="bn">Responde sin rodeos, con tus números reales. No es asesoría regulada.</div>',{full:true});
+  const b=abrirSheet('Analista financiero','<div id="chL" style="min-height:260px;max-height:55vh;overflow:auto"></div><div class="chips" id="chS" style="margin:8px 0"></div><div style="display:flex;gap:8px"><input id="chI" placeholder="Pregunta lo que quieras sobre tu dinero…" autocomplete="off" style="flex:1"><button class="btn" id="chB" style="margin:0;width:auto;padding:0 18px">'+ic('send')+'</button></div><div class="bn">Calcula con tus movimientos reales y te explica el resultado. Solo analiza: no modifica nada. Las proyecciones son estimaciones, no garantías.</div>',{full:true});
   const L=$('#chL');
   const pintar=()=>{
-    L.innerHTML=S.chat.length?S.chat.map(m=>'<div style="display:flex;justify-content:'+(m.rol==='user'?'flex-end':'flex-start')+';margin:8px 0"><div style="max-width:86%;padding:10px 14px;border-radius:18px;background:'+(m.rol==='user'?'var(--ac)':'var(--cd2,var(--bg2))')+';color:'+(m.rol==='user'?'#fff':'var(--tx)')+';font-size:15px;line-height:1.45">'+fmtChat(m.texto)+'</div></div>').join(''):'<div class="empty"><b>Tu asesor financiero</b>Pregúntame por una compra, una deuda, una inversión o cómo vas este mes.</div>';
+    L.innerHTML=S.chat.length?S.chat.map(m=>'<div style="display:flex;justify-content:'+(m.rol==='user'?'flex-end':'flex-start')+';margin:8px 0"><div style="max-width:86%;padding:10px 14px;border-radius:18px;background:'+(m.rol==='user'?'var(--ac)':'var(--cd2,var(--bg2))')+';color:'+(m.rol==='user'?'#fff':'var(--tx)')+';font-size:15px;line-height:1.45">'+fmtChat(m.texto)+(m.datos&&m.datos.length?'<div class="mut" style="font-size:11.5px;margin-top:6px">Datos usados: '+m.datos.map(d=>({resumen:'resumen del periodo',agrupar:'totales por grupo',serie_mensual:'serie mensual',comparar:'comparación de periodos',buscar:'búsqueda de movimientos',recurrentes:'pagos recurrentes',anomalias:'detección de anomalías',estado_actual:'saldos de hoy',simular:'simulación',meta:'cálculo de meta'}[d]||d)).join(', ')+'</div>':'')+'</div></div>').join(''):'<div class="empty"><b>Tu asesor financiero</b>Pregúntame por una compra, una deuda, una inversión o cómo vas este mes.</div>';
     L.scrollTop=L.scrollHeight;
   };
-  const sug=['¿Cómo voy este mes?','¿Me conviene comprar algo de S/ 1,500?','¿Qué recorto primero?','¿Estoy invirtiendo lo suficiente?'];
+  const sug=['¿En qué gasto más?','¿Cómo voy vs. el mes pasado?','¿Qué suscripciones tengo y cuánto cuestan al año?','¿Puedo comprar algo de S/ 2,000 este mes?','¿Hay movimientos raros que revisar?','¿Qué pasa si pierdo mis ingresos 3 meses?'];
   $('#chS').innerHTML=sug.map((s,i)=>'<button class="chip" data-s="'+i+'">'+esc(s)+'</button>').join('');
   $('#chS').onclick=e=>{const x=e.target.closest('[data-s]');if(x)enviar(sug[+x.dataset.s])};
   let ocupado=false;
@@ -1302,7 +1344,7 @@ function sAsesor0(pregunta){
     txt=String(txt||'').trim();if(!txt||ocupado)return;ocupado=true;
     S.chat.push({rol:'user',texto:txt});$('#chI').value='';pintar();
     L.insertAdjacentHTML('beforeend','<div id="chT" class="mut" style="margin:8px 4px">Analizando tus números…</div>');L.scrollTop=L.scrollHeight;
-    try{const r=await api('chat',{mensajes:S.chat.slice(-12)});S.chat.push({rol:'asesor',texto:r.respuesta||'Sin respuesta.'})}
+    try{const r=await api('analista',{mensajes:S.chat.slice(-10)});S.chat.push({rol:'asesor',texto:r.respuesta||'Sin respuesta.',datos:(r.herramientas||[]).map(x=>x.nombre)})}
     catch(e){if(e.message!=='auth')S.chat.push({rol:'asesor',texto:'No pude responder: '+e.message})}
     ocupado=false;pintar();
   }
@@ -1512,7 +1554,7 @@ async function detalleAccion(p){
 function vMas(){
   const it=(k,i,t,s)=>'<div class="row2 tap" data-m="'+k+'"><div class="ico">'+ic(i)+'</div><div class="mid"><b>'+t+'</b><small>'+s+'</small></div><span class="chev mut">'+ic('chevron-right')+'</span></div>';
   let h=cabecera('Más','Configuración');
-  h+='<div class="card menu"><h3>Asesor</h3>'+it('asesor','message-circle','Asesor financiero','Pregunta antes de comprar, endeudarte o invertir')+'</div>';
+  h+='<div class="card menu"><h3>Analista IA</h3>'+it('asesor','message-circle','Analista financiero','Pregúntale lo que quieras sobre tu dinero: calcula con tus datos reales')+it('perfil','user-round-search','Mi perfil financiero','Tus hábitos, fortalezas y qué mejorar')+'</div>';
   h+='<div class="card menu"><h3>Planificación</h3>'+it('plan','pie-chart','Plan del mes','Reparto, presupuestos y lo que te queda')+it('metas','target','Metas','Ingresos y ahorro')+it('pagos','calendar-clock','Pagos','Programados, recurrentes y puntualidad')+'</div>';
   h+='<div class="card menu"><h3>Orden</h3>'+it('categorias','tags','Categorías','Subcategorías y tipo de ingreso')+it('reglas','wand-sparkles','Reglas automáticas','Clasifican tus gastos por palabra clave')+it('ajustes','sliders-horizontal','Predeterminados','Medio de pago y cuenta')+'</div>';
   h+='<div class="card menu"><h3>Sistema</h3>'+it('copia','database-backup','Copia de seguridad','Guarda o restaura tus datos')+it('exportar','file-spreadsheet','Exportar movimientos','Archivo CSV')+it('ia','sparkles','Inteligencia artificial','Clave gratuita de Gemini para el asesor')+it('pdf','file-text','Reportes en PDF','Mensual o anual, para guardar o compartir')+it('avisos','bell','Avisos','Calendario y recordatorios')+it('hoja','table','Conectar con mi hoja','Sincroniza con tu Google Sheets y Telegram')+it('pin','lock','Cambiar PIN','')+it('tema','sun-moon','Tema','Claro u oscuro')+'</div>';
@@ -1520,7 +1562,7 @@ function vMas(){
 }
 function postMas(){document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>abrirMas(b.dataset.m))}
 function abrirMas(k){
-  const f={migrar:sMigrar,exportar:sExportar,copia:sCopiaLocal,pdf:sReportePDF,avisos:sAvisos,hoja:sHoja,ia:()=>sClaveIA(),pin:sCambiarPin,pagos:()=>sPagos(),plan:()=>sPlan(),metas:()=>sMetas(),presupuestos:()=>crudPresupuestos(),categorias:sCategorias,reglas:()=>crudReglas(),asesor:()=>sAsesor(),objetivos:formObjetivos,ajustes:sAjustes,reporte:sReporte,estado:sEstado,tema:cambiarTema}[k];
+  const f={migrar:sMigrar,exportar:sExportar,copia:sCopiaLocal,pdf:sReportePDF,avisos:sAvisos,hoja:sHoja,ia:()=>sClaveIA(),pin:sCambiarPin,pagos:()=>sPagos(),plan:()=>sPlan(),metas:()=>sMetas(),presupuestos:()=>crudPresupuestos(),categorias:sCategorias,reglas:()=>crudReglas(),asesor:()=>sAsesor(),perfil:()=>sPerfil(),objetivos:formObjetivos,ajustes:sAjustes,reporte:sReporte,estado:sEstado,tema:cambiarTema}[k];
   if(f)f();
 }
 
