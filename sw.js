@@ -1,4 +1,4 @@
-const V='finanzas-v4';
+const V='finanzas-v5';
 const ARCH=['config.js','jspdf.umd.min.js','jspdf.plugin.autotable.min.js','./','index.html','worker.js','shim.js','gs-bundle.js','prelude.js','chart.umd.min.js','lucide.min.js','manifest.webmanifest','icon-192.png','icon-512.png'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(V).then(c=>c.addAll(ARCH)).then(()=>self.skipWaiting()))});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(x=>x!==V).map(x=>caches.delete(x)))).then(()=>self.clients.claim()))});
