@@ -1863,6 +1863,13 @@ function procesarCallbackTelegram_(cb) {
       enviarMensajeTelegram('✅ Registrado' + (atras > 0 ? ' con fecha de hace ' + atras + (atras === 1 ? ' día' : ' días') : ' con la fecha de hoy') + '. ' + escaparMd_(textoPuntualidadProgramado_(partes[1])));
     } else if (partes[0] === 'undo') {
       responderCallbackTelegram_(cb.id, deshacerLote_(partes[1]) ? 'Deshecho' : 'Ya estaba deshecho');
+    } else if (partes[0] === 'cat') {
+      const gastoCat = partes[2] === 'g';
+      const nombreCat = categoriasOrdenadas_(gastoCat)[Number(partes[3])];
+      if (!nombreCat) { responderCallbackTelegram_(cb.id, 'Esa lista cambió, escríbeme de nuevo'); return; }
+      editarMovimiento(partes[1], { categoria: nombreCat, subcategoria: '' });
+      responderCallbackTelegram_(cb.id, 'Listo');
+      enviarMensajeTelegram('🏷️ Categoría: ' + escaparMd_(nombreCat) + ' ✅');
     } else if (partes[0] === 'prog_no') {
       cancelarProgramado(partes[1]);
       responderCallbackTelegram_(cb.id, 'Cancelado');
@@ -1876,6 +1883,7 @@ function procesarCallbackTelegram_(cb) {
 
 var AYUDA_TELEGRAM_ =
   '*Puedes escribirme normal o mandarme un audio*, por ejemplo: "gasté 5 soles en huevos", "me pagaron 600 del alquiler", "el viernes pago 80 dólares de internet".\n\n' +
+  '*Soy inteligente*: detecto solo si es gasto o ingreso, la categoría, la cuenta o tarjeta, y si dividiste la cuenta ("cena 80 soles con la BCP, dividí con Ana y Luis"). Si me falta el monto u otro dato, te lo pregunto. Escribe "cancela" para descartar.\n\n' +
   '*Comandos*\n' +
   '/saldo — saldos y patrimonio\n' +
   '/meta — progreso de metas\n' +
@@ -2516,7 +2524,7 @@ var API_ESCRITURA_ = ['registrar', 'editarMovimiento', 'eliminarMovimiento', 'tr
   'eliminarCuenta', 'ajustarSaldo', 'editarProgramado', 'cancelarProgramado', 'eliminarProgramado', 'realizarProgramado', 'guardarMeta', 'eliminarMeta',
   'guardarPresupuesto', 'eliminarPresupuesto', 'guardarRecurrente', 'eliminarRecurrente', 'guardarRegla', 'eliminarRegla', 'guardarAjustes',
   'operacionInversion', 'eliminarOperacion', 'crearPrestamo', 'guardarProyecto', 'eliminarProyecto', 'asignarProyecto', 'guardarFondo', 'respaldoAhora', 'enviarExportacion', 'compraParaOtro', 'cobrarPersona', 'editarPrestamo', 'cerrarPrestamo', 'renombrarPersona', 'cobrarInteres', 'devolverCapital', 'crearDeuda', 'pagarCuota',
-  'configurarTarjeta','guardarTarjeta','eliminarTarjeta','repararTelegram', 'guardarObjetivos', 'guardarCategoria', 'guardarNaturaleza', 'guardarMetaAhorro', 'eliminarMetaAhorro', 'moverMetaAhorro', 'eliminarCategoria', 'guardarSubcategoria', 'eliminarSubcategoria', 'guardarWatchlist'];
+  'configurarTarjeta','guardarTarjeta','eliminarTarjeta','repararTelegram', 'guardarObjetivos', 'guardarCategoria', 'guardarNaturaleza', 'guardarMetaAhorro', 'eliminarMetaAhorro', 'moverMetaAhorro', 'eliminarCategoria', 'guardarSubcategoria', 'eliminarSubcategoria', 'guardarWatchlist', 'registrarDividido', 'registrarDivision', 'eliminarDivision'];
 var API_ADMIN_ = ['enviarReporte', 'estadoSistema'];
 
 /**
@@ -3570,6 +3578,10 @@ function obtenerDetalleMovimiento(id) {
     det.editable = 'texto'; det.eliminable = false;
     det.aviso = 'Está ligado a un préstamo o deuda: solo puedes editar textos.';
   }
+  try {
+    const dd = detalleDivision_(m);
+    if (dd) { det.division = dd; det.aviso = (det.aviso ? det.aviso + ' ' : '') + 'Gasto dividido: para cambiar el monto, la moneda o la cuenta, primero deshaz la división.'; }
+  } catch (e) { /* sin datos de división */ }
   return det;
 }
 
@@ -3593,6 +3605,9 @@ function editarMovimiento(id, c) {
     const clase = clasificarMovimiento_(m);
     const hoja = getHoja_('Movimientos');
     const t = validarCamposTexto_(c, m);
+    // La marca de "gasto dividido" vive en las notas: si editas las notas no se puede perder
+    const marcaDiv = String(m.notas).match(/Dividido #\w+ \(total [\d.]+\)/);
+    if (marcaDiv && !/Dividido #\w+ \(total [\d.]+\)/.test(t.notas)) t.notas = (t.notas ? t.notas + ' · ' : '') + marcaDiv[0];
 
     const soloTexto = function () {
       hoja.getRange(m.fila, M.CENTRO + 1, 1, 8).setValues([[t.centro, t.categoria, t.subcategoria, t.descripcion, m.medio, t.sunat, m.origen, t.notas]]);
@@ -3608,6 +3623,10 @@ function editarMovimiento(id, c) {
     const nuevaMoneda = c.moneda !== undefined ? validarMoneda_(c.moneda) : m.moneda;
     const nuevaFecha = c.fecha !== undefined && c.fecha !== '' ? fechaConHora_(c.fecha) : m.fecha;
     if (esFuturo_(nuevaFecha)) throw new Error('La fecha es futura. Para algo que aún no ocurre usa "Programar".');
+    if (marcaDiv) {
+      const cambiaCuenta = c.cuentaId !== undefined && c.cuentaId !== '' && String(c.cuentaId) !== String(m.cuentaId);
+      if (nuevoMonto !== m.monto || nuevaMoneda !== m.moneda || cambiaCuenta) throw new Error('Este gasto está dividido: para cambiar el monto, la moneda o la cuenta primero deshaz la división.');
+    }
 
     // --- Gasto con tarjeta ---
     if (clase === 'tarjeta') {
@@ -3685,6 +3704,16 @@ function eliminarMovimiento(id) {
     if (inv) { eliminarOperacionInversion(inv); return; }
 
     if (clase === 'ligado') throw new Error('Está ligado a un préstamo o deuda y no se puede borrar desde aquí.');
+
+    // Gasto dividido: al borrarlo también se borran las deudas que generó (si nadie te ha devuelto nada)
+    if (/Dividido #\w+ \(total [\d.]+\)/.test(m.notas)) {
+      if (clase === 'tarjeta') {
+        const tidD = extraerRef_(m.notas, /Ref\. TarjetaCredito #(\d+)/);
+        const tjD = tidD ? buscarFilaPorId_('TarjetaCredito', tidD) : null;
+        if (tjD && String(tjD.fila[7]).trim() === 'Pagado') throw new Error('Ese consumo ya se pagó con un estado de cuenta; no se puede borrar.');
+      }
+      quitarDeudasDivision_(m.id);
+    }
 
     if (clase === 'tarjeta' && /Cuotas #\w+ \(\d+\/\d+\)/.test(m.notas)) {
       eliminarGrupoCuotas_(extraerRef_(m.notas, /Cuotas #(\w+) \(/));
@@ -4385,24 +4414,52 @@ function categoriasConocidas_() {
   return ['gastos: ' + Object.keys(p.Gasto).slice(0, 40).join(', '), 'ingresos: ' + Object.keys(p.Ingreso).slice(0, 25).join(', ')];
 }
 
-function interpretarMensajeIA_(texto) {
+/** Texto con tus categorías (y subcategorías), cuentas, tarjetas y personas, para que la IA elija con datos reales */
+function contextoIA_() {
+  const p = categoriasPorTipo_();
+  const fmt = function (m) { return Object.keys(m).slice(0, 45).map(function (c) { return c + (m[c].length ? ' (' + m[c].slice(0, 8).join(', ') + ')' : ''); }).join('; '); };
+  let cuentas = '';
+  try { cuentas = obtenerCuentasActivas_().map(function (c) { return c.banco + ' [' + c.moneda + ', ' + c.tipo + ']'; }).join('; '); } catch (e) { /* sin cuentas */ }
+  let personas = '';
+  try { personas = Object.keys(mapaPersonas_()).map(function (k) { return mapaPersonas_()[k]; }).slice(0, 30).join(', '); } catch (e) { /* sin personas */ }
+  return { gastos: fmt(p.Gasto), ingresos: fmt(p.Ingreso), cuentas: cuentas, tarjetas: tarjetasActivas_().map(function (t) { return t.banco; }).join(', '), personas: personas };
+}
+
+/**
+ * Convierte el mensaje en acciones. `pendiente` (opcional) = { json, pregunta, original } cuando el usuario está respondiendo
+ * a una pregunta del bot: la IA completa lo que faltaba y devuelve el JSON final.
+ */
+function interpretarMensajeIA_(texto, pendiente) {
   const ahora = new Date();
   const dias = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+  const ctx = contextoIA_();
   const system =
-    'Eres el asistente de finanzas personales de un usuario en Lima, Perú. Convierte su mensaje en acciones. Hoy es ' + dias[ahora.getDay()] + ' ' + fechaISO_(ahora) +
+    'Eres el asistente de finanzas personales de un usuario en Perú. Convierte su mensaje en acciones. Hoy es ' + dias[ahora.getDay()] + ' ' + fechaISO_(ahora) +
     ' y son las ' + Utilities.formatDate(ahora, zona_(), 'HH:mm') + '.\n' +
-    'Responde SOLO con JSON: {"acciones":[...],"no_entendi":false}\n' +
+    'Responde SOLO con JSON: {"acciones":[...],"pregunta":null,"no_entendi":false}\n' +
     'Cada acción es una de:\n' +
-    '{"accion":"registrar","tipo":"gasto|ingreso","monto":número,"moneda":"PEN|USD|EUR","descripcion":"texto corto","medio":"tarjeta|efectivo|debito|null","tarjeta":"nombre o null","fecha":"YYYY-MM-DD"|"YYYY-MM-DDTHH:MM"|null,"clase":"personal|fijo|inversion|activo|pasivo|null","categoria":string|null}\n' +
+    '{"accion":"registrar","tipo":"gasto|ingreso|null","monto":número|null,"moneda":"PEN|USD|EUR","descripcion":"texto corto"|null,"medio":"tarjeta|efectivo|debito|null","tarjeta":"nombre o null","cuenta":"nombre de la cuenta o null","fecha":"YYYY-MM-DD"|"YYYY-MM-DDTHH:MM"|null,"clase":"personal|fijo|inversion|activo|pasivo|null","categoria":string|null,"subcategoria":string|null,"dividir":null|{"modo":"igual|porcentaje|monto","personas":[{"nombre":"Ana","pct":null,"monto":null}]}}\n' +
     '{"accion":"consulta","tema":"saldo|metas|tarjeta|mes"}\n' +
-    'Reglas: "soles/sol/S/" = PEN; "dólares/usd/$" = USD; "euros/€" = EUR; si no dice la moneda usa PEN. ' +
-    'tarjeta: si dice con cuál tarjeta (por ejemplo "con la BCP" o "con la Interbank"), pon ese nombre en "tarjeta"; si no, null. Tarjetas del usuario: [' + tarjetasActivas_().map(function (t) { return t.banco; }).join(', ') + ']. ' +
+    'REGLAS DE LECTURA: "soles/sol/S/" = PEN; "dólares/usd/$" = USD; "euros/€" = EUR; si no dice la moneda usa PEN. ' +
+    'Gasto o ingreso se deduce por el sentido ("gasté, pagué, compré, me cobraron" = gasto; "me pagaron, cobré, me depositaron, vendí" = ingreso). ' +
+    'tarjeta: si dice con cuál tarjeta, pon ese nombre; si no, null. Tarjetas: [' + ctx.tarjetas + ']. ' +
+    'cuenta: si menciona una cuenta o billetera ("de mi BCP", "con yape", "de Interbank") pon su nombre tal como esté en esta lista, si no null. Cuentas: [' + ctx.cuentas + ']. ' +
     'medio: "con tarjeta/crédito" = tarjeta; "efectivo/cash/en mano" = efectivo; "yape/plin/transferencia/débito/depósito" = debito; si no lo dice, null. ' +
-    'fecha: null si es ahora ("hoy", sin fecha); convierte "ayer", "el viernes", "mañana", "el 5 de noviembre" a fecha exacta. Si algo ocurrirá en el futuro, pon esa fecha futura. ' +
+    'fecha: null si es ahora; convierte "ayer", "el viernes", "mañana", "el 5 de noviembre" a fecha exacta. Si ocurrirá en el futuro, pon esa fecha futura. ' +
     'clase: gasto → personal (por defecto), fijo (suscripciones, alquiler, servicios) o inversion (negocio, compras para vender); ingreso → activo (por defecto) o pasivo (alquileres, intereses, dividendos). ' +
-    'categoria: usa una de estas listas según sea gasto o ingreso (' + categoriasConocidas_().join(' | ') + ') solo si encaja claramente; si no, null. ' +
-    'Si el mensaje trae varios movimientos, devuelve varias acciones. Si no es un movimiento ni una consulta, devuelve {"acciones":[],"no_entendi":true}. Nunca inventes montos.';
-  return extraerJSON_(iaTexto_(system, texto, 700));
+    'categoria y subcategoria: ELIGE SIEMPRE la que mejor encaje de estas listas, tal como están escritas (no inventes nombres nuevos); null solo si ninguna encaja de verdad. ' +
+    'Categorías de gasto: ' + ctx.gastos + '. Categorías de ingreso: ' + ctx.ingresos + '. ' +
+    'dividir: si dice que dividió/repartió la cuenta, que pagó por otros o con quién lo compartió ("dividí con Ana y Luis", "salimos con Pedro y yo pagué", "Ana me debe 8"), pon en personas a las OTRAS personas (sin contar al usuario). ' +
+    'modo "igual" = partes iguales entre el usuario y esas personas; "porcentaje" si da porcentajes (pct); "monto" si dice cuánto debe devolver cada una (monto). "monto" siempre es lo que PAGÓ el usuario en total. Personas conocidas: [' + ctx.personas + '] (si el nombre se parece a uno de ellos, usa ese). ' +
+    'Si dice "entre 4" o "somos 4" sin nombres, pregunta los nombres. ' +
+    'FALTANTES: nunca inventes monto, ni si es gasto o ingreso. Si falta algo imprescindible (monto; si es gasto o ingreso; de qué fue si no se puede deducir nada; los nombres cuando quiere dividir y no dice con quién) devuelve en "acciones" lo que sí entendiste (con null en lo que falta) y escribe en "pregunta" UNA sola pregunta corta, amable y concreta. Si no falta nada imprescindible, "pregunta" es null. Lo no imprescindible (moneda, medio de pago, fecha, categoría) se completa solo, no preguntes por eso. ' +
+    'Si el mensaje trae varios movimientos, devuelve varias acciones. Si no es un movimiento ni una consulta, devuelve {"acciones":[],"pregunta":null,"no_entendi":true}.';
+  let usuario = texto;
+  if (pendiente) {
+    usuario = 'Mensaje original del usuario: ' + pendiente.original + '\nLo que ya entendiste (JSON): ' + JSON.stringify(pendiente.json) + '\nTu pregunta fue: ' + pendiente.pregunta +
+      '\nRespuesta del usuario: ' + texto + '\nCompleta la información con su respuesta y devuelve el JSON final con la misma estructura (si ya no falta nada, "pregunta": null). Si la respuesta no tiene relación con tu pregunta y es un mensaje nuevo, interprétalo como un mensaje nuevo.';
+  }
+  return extraerJSON_(iaTexto_(system, usuario, 900));
 }
 
 var CLASES_GASTO_ = { personal: 'Gasto Personal', fijo: 'Gasto Fijo', inversion: 'Gasto Inversion' };
@@ -4437,9 +4494,49 @@ function registrarOProgramar_(d) {
   return { programado: false, id: idI, idMov: idI };
 }
 
-/** Ejecuta las acciones que devolvió la IA. Devuelve { lineas: [texto], deshacer: [{k,id}] } */
+function cuentaPorNombre_(txt, moneda) {
+  const q = normalizarTxt_(txt);
+  if (!q) return null;
+  const l = obtenerCuentasActivas_();
+  const cand = l.filter(function (c) { const b = normalizarTxt_(c.banco); return b === q || b.indexOf(q) !== -1 || q.indexOf(b) !== -1; });
+  return cand.filter(function (c) { return c.moneda === moneda; })[0] || cand[0] || null;
+}
+
+/** Devuelve el nombre real de la categoría (sin importar tildes/mayúsculas) o '' si no existe */
+function categoriaCanon_(cat, esGastoTipo) {
+  const q = normalizarTxt_(cat);
+  if (!q) return '';
+  const m = categoriasPorTipo_()[esGastoTipo ? 'Gasto' : 'Ingreso'];
+  return Object.keys(m).filter(function (c) { return normalizarTxt_(c) === q; })[0] || '';
+}
+function subcategoriaCanon_(cat, sub, esGastoTipo) {
+  const q = normalizarTxt_(sub);
+  if (!q || !cat) return '';
+  const m = categoriasPorTipo_()[esGastoTipo ? 'Gasto' : 'Ingreso'];
+  return (m[cat] || []).filter(function (x) { return normalizarTxt_(x) === q; })[0] || '';
+}
+
+/** Lista fija (alfabética) de categorías: los botones de Telegram apuntan a su posición aquí */
+function categoriasOrdenadas_(esGastoTipo) {
+  return Object.keys(categoriasPorTipo_()[esGastoTipo ? 'Gasto' : 'Ingreso']).filter(function (c) { return c !== 'Intereses y comisiones'; }).sort();
+}
+
+/** Categorías más usadas (para ofrecerlas como botones cuando la IA no logró clasificar) */
+function categoriasFrecuentes_(esGastoTipo, n) {
+  const cuenta = {};
+  leerMovimientos_().slice(-300).forEach(function (m) {
+    if (esGastoTipo ? !esGasto_(m.tipo) : !esIngreso_(m.tipo)) return;
+    const c = String(m.categoria || '').trim();
+    if (c && c !== 'Intereses y comisiones') cuenta[c] = (cuenta[c] || 0) + 1;
+  });
+  const lista = Object.keys(cuenta).sort(function (a, b) { return cuenta[b] - cuenta[a]; });
+  Object.keys(categoriasPorTipo_()[esGastoTipo ? 'Gasto' : 'Ingreso']).forEach(function (c) { if (lista.indexOf(c) === -1 && c !== 'Intereses y comisiones') lista.push(c); });
+  return lista.slice(0, n);
+}
+
+/** Ejecuta las acciones que devolvió la IA. Devuelve { lineas: [texto], deshacer: [{k,id}], sinCategoria: [{id, gasto}] } */
 function ejecutarAccionesIA_(acciones) {
-  const lineas = [], deshacer = [];
+  const lineas = [], deshacer = [], sinCategoria = [];
   acciones.forEach(function (a) {
     try {
       if (a.accion === 'consulta') {
@@ -4452,22 +4549,42 @@ function ejecutarAccionesIA_(acciones) {
       if (a.accion !== 'registrar') return;
       const gasto = a.tipo === 'gasto';
       const tipo = gasto ? (CLASES_GASTO_[a.clase] || 'Gasto Personal') : (CLASES_INGRESO_[a.clase] || 'Ingreso Activo');
-      const medio = a.medio === 'tarjeta' ? 'Tarjeta' : (a.medio === 'efectivo' ? 'Efectivo' : (a.medio === 'debito' ? 'Debito' : ''));
+      let medio = a.medio === 'tarjeta' ? 'Tarjeta' : (a.medio === 'efectivo' ? 'Efectivo' : (a.medio === 'debito' ? 'Debito' : ''));
       const monto = validarMonto_(a.monto);
       const moneda = validarMoneda_(a.moneda || 'PEN');
-      const tj = a.tarjeta ? tarjetaPorNombre_(a.tarjeta) : null;
-      const r = registrarOProgramar_({ tipo: tipo, monto: monto, moneda: moneda, descripcion: String(a.descripcion || '').trim(), medio: medio || (tj ? 'Tarjeta' : ''), tarjetaId: tj ? tj.id : undefined, fecha: a.fecha || null, categoria: a.categoria || '' });
+      let tj = a.tarjeta ? tarjetaPorNombre_(a.tarjeta) : null;
+      let cuenta = null;
+      if (a.cuenta && !tj) {
+        tj = tarjetaPorNombre_(a.cuenta);
+        if (!tj) { cuenta = cuentaPorNombre_(a.cuenta, moneda); if (cuenta) { medio = cuenta.tipo === 'Efectivo' ? 'Efectivo' : 'Debito'; } }
+      }
+      const desc = String(a.descripcion || '').trim();
+      // categoría: la que eligió la IA (si existe en tu lista) o, si no, tus reglas guardadas
+      let cat = categoriaCanon_(a.categoria, gasto), sub = cat ? subcategoriaCanon_(cat, a.subcategoria, gasto) : '';
+      if (!cat) { const auto = autoCategorizar_(desc); cat = auto.categoria || ''; sub = auto.subcategoria || ''; }
+      const r = registrarOProgramar_({ tipo: tipo, monto: monto, moneda: moneda, descripcion: desc, medio: medio || (tj ? 'Tarjeta' : ''), tarjetaId: tj ? tj.id : undefined, cuentaId: cuenta ? cuenta.id : undefined, fecha: a.fecha || null, categoria: cat, subcategoria: sub });
       deshacer.push({ k: r.programado ? 'prog' : 'mov', id: r.programado ? r.id : r.idMov });
-      const auto = autoCategorizar_(a.descripcion || '');
-      const cat = a.categoria || auto.categoria;
-      lineas.push((r.programado ? '📅 Programado' : '✅ Registrado') + ': ' + (gasto ? 'gasto' : 'ingreso') + ' de ' + formatoMonto_(monto, moneda) +
-        ' — "' + escaparMd_(a.descripcion || '') + '"' + (cat ? ' (' + escaparMd_(cat) + ')' : '') +
-        (r.programado ? ' para el ' + escaparMd_(String(a.fecha).replace('T', ' ')) : (gasto ? ' · ' + (medio === 'Efectivo' ? 'efectivo' : (medio === 'Debito' ? 'débito' : (medio === 'Tarjeta' ? 'tarjeta' : medioGastoPorDefecto_(moneda).toLowerCase()))) : '')));
+      const medioTxt = gasto ? ' · ' + (tj ? 'tarjeta ' + escaparMd_(tj.banco) : (cuenta ? escaparMd_(cuenta.banco) : (medio === 'Efectivo' ? 'efectivo' : (medio === 'Debito' ? 'débito' : (medio === 'Tarjeta' ? 'tarjeta' : medioGastoPorDefecto_(moneda).toLowerCase()))))) : (cuenta ? ' · ' + escaparMd_(cuenta.banco) : '');
+      let linea = (r.programado ? '📅 Programado' : '✅ Registrado') + ': ' + (gasto ? 'gasto' : 'ingreso') + ' de ' + formatoMonto_(monto, moneda) +
+        ' — "' + escaparMd_(desc) + '"' + (cat ? ' (' + escaparMd_(cat) + (sub ? ' / ' + escaparMd_(sub) : '') + ')' : '') +
+        (r.programado ? ' para el ' + escaparMd_(String(a.fecha).replace('T', ' ')) : medioTxt);
+      // dividir con otras personas
+      if (a.dividir && a.dividir.personas && a.dividir.personas.length) {
+        if (!gasto || r.programado || !r.idMov) linea += '\n⚠️ Solo se pueden dividir gastos que ya ocurrieron; lo registré sin dividir.';
+        else {
+          try {
+            const d = dividirMovimientoInterno_(r.idMov, { modo: a.dividir.modo, personas: a.dividir.personas });
+            linea += '\n➗ Dividido: tu parte ' + formatoMonto_(d.yo, moneda) + ' · ' + d.personas.map(function (x) { return escaparMd_(x.nombre) + ' ' + formatoMonto_(x.monto, moneda); }).join(', ') + ' (por cobrar en Deudas)';
+          } catch (e2) { linea += '\n⚠️ Lo registré completo pero no pude dividirlo: ' + escaparMd_(e2.message); }
+        }
+      }
+      lineas.push(linea);
+      if (!cat && !r.programado && r.idMov) sinCategoria.push({ id: r.idMov, gasto: gasto });
     } catch (e) {
       lineas.push('❌ No pude registrar "' + escaparMd_(a.descripcion || '') + '": ' + escaparMd_(e.message));
     }
   });
-  return { lineas: lineas, deshacer: deshacer };
+  return { lineas: lineas, deshacer: deshacer, sinCategoria: sinCategoria };
 }
 
 function construirMensajeMes_() {
@@ -4478,23 +4595,70 @@ function construirMensajeMes_() {
   return t;
 }
 
+// Conversación pendiente: si al bot le falta un dato, lo pregunta y recuerda tu mensaje 20 minutos
+function guardarPendienteTg_(p) { try { CacheService.getScriptCache().put('TG_PENDIENTE', JSON.stringify(p), 1200); } catch (e) { /* sin caché */ } }
+function leerPendienteTg_() { try { const t = CacheService.getScriptCache().get('TG_PENDIENTE'); return t ? JSON.parse(t) : null; } catch (e) { return null; } }
+function borrarPendienteTg_() { try { CacheService.getScriptCache().remove('TG_PENDIENTE'); } catch (e) { /* ignorar */ } }
+
+/** Lo mínimo que hay que saber de un movimiento; devuelve la pregunta que falta o '' */
+function preguntaFaltante_(acciones) {
+  for (let i = 0; i < acciones.length; i++) {
+    const a = acciones[i];
+    if (a.accion !== 'registrar') continue;
+    const que = a.descripcion ? ' "' + a.descripcion + '"' : '';
+    if (a.tipo !== 'gasto' && a.tipo !== 'ingreso') return '¿Fue un gasto o un ingreso' + (a.monto ? ' de ' + a.monto : '') + que + '?';
+    if (!(Number(a.monto) > 0)) return '¿De cuánto fue' + (que ? ' el ' + (a.tipo === 'gasto' ? 'gasto' : 'ingreso') + que : '') + '?';
+    if (!String(a.descripcion || '').trim() && !a.categoria) return '¿En qué fue ese ' + (a.tipo === 'gasto' ? 'gasto' : 'ingreso') + ' de ' + a.monto + '?';
+    if (a.dividir && a.dividir.personas && !a.dividir.personas.length) return '¿Con quién lo dividiste? Dime los nombres.';
+  }
+  return '';
+}
+
 function procesarMensajeLibreTelegram_(texto) {
   if (!iaProveedor_()) {
     return enviarMensajeTelegram('Para que entienda mensajes libres necesito una IA: agrega ANTHROPIC_API_KEY (o GEMINI_API_KEY) en las propiedades del script. Mientras tanto usa /gasto, /efectivo, /ingreso o escribe /ayuda.');
   }
+  const pend = leerPendienteTg_();
+  if (pend && /^\s*(cancela|cancelar|olvídalo|olvidalo|no importa|déjalo|dejalo)\s*[.!]*\s*$/i.test(texto)) {
+    borrarPendienteTg_();
+    return enviarMensajeTelegram('Listo, lo olvidé. No registré nada.');
+  }
   let j, aviso = '';
-  try { j = interpretarMensajeIA_(texto); }
+  try { j = interpretarMensajeIA_(texto, pend && pend.ronda < 3 ? pend : null); }
   catch (e) {
     j = interpretarLocal_(texto);
     if (!j) return enviarMensajeTelegram('❌ La IA no pudo leer tu mensaje: ' + escaparMd_(e.message) + '\nPuedes escribirlo simple ("gasté 5 soles en huevos") o usar /gasto 5 PEN huevos.');
     aviso = '\n_(La IA no respondió; lo entendí en modo básico. Revísalo.)_';
   }
   const acciones = (j.acciones || []).slice(0, 8);
-  if (!acciones.length) return enviarMensajeTelegram('No entendí qué quieres registrar. Prueba: "gasté 5 soles en huevos" o "me pagaron 600 soles del alquiler". /ayuda para ver comandos.');
+  if (!acciones.length) {
+    if (pend) borrarPendienteTg_();
+    return enviarMensajeTelegram('No entendí qué quieres registrar. Prueba: "gasté 5 soles en huevos" o "me pagaron 600 soles del alquiler". /ayuda para ver comandos.');
+  }
+
+  // ¿falta algo imprescindible? se pregunta y no se registra nada todavía
+  const pregunta = preguntaFaltante_(acciones) || (j.pregunta ? String(j.pregunta) : '');
+  if (pregunta && !j.local) {
+    const ronda = pend ? (pend.ronda || 0) + 1 : 1;
+    if (ronda <= 3) {
+      guardarPendienteTg_({ original: pend ? pend.original : texto, json: { acciones: acciones }, pregunta: pregunta, ronda: ronda });
+      return enviarMensajeTelegram('🤔 ' + escaparMd_(pregunta) + '\n_(Responde con el dato, o escribe "cancela")_');
+    }
+  }
+  borrarPendienteTg_();
 
   const r = ejecutarAccionesIA_(acciones);
   const lote = r.deshacer.length ? guardarDeshacer_(r.deshacer) : '';
   enviarMensajeTelegram(r.lineas.join('\n') + aviso, lote ? [[{ text: '↩️ Deshacer', data: 'undo:' + lote }]] : undefined);
+  // lo que la IA no pudo clasificar: te lo pregunta con botones
+  r.sinCategoria.slice(0, 2).forEach(function (x) {
+    const cats = categoriasFrecuentes_(x.gasto, 8);
+    if (!cats.length) return;
+    const filas = [];
+    const orden = categoriasOrdenadas_(x.gasto);
+    cats.forEach(function (c, i) { if (i % 2 === 0) filas.push([]); filas[filas.length - 1].push({ text: c, data: 'cat:' + x.id + ':' + (x.gasto ? 'g' : 'i') + ':' + orden.indexOf(c) }); });
+    enviarMensajeTelegram('🏷️ No supe en qué categoría poner ese ' + (x.gasto ? 'gasto' : 'ingreso') + '. ¿Cuál es?', filas);
+  });
 }
 
 function procesarAudioTelegram_(fileId) {
@@ -6387,4 +6551,208 @@ function api_moverMetaAhorro(a) {
     }
     throw new Error('Meta no encontrada.');
   });
+}
+/* ==== 30_DividirGastos.gs ==== */
+/**
+ * ============================================================
+ * DIVIDIR GASTOS
+ * ============================================================
+ * Cuando pagas tú una cuenta compartida (ej: salen 4 y pagas 20 soles), solo TU parte es gasto tuyo.
+ * La parte de los demás queda como "por cobrar" en Deudas (Préstamos otorgados, sin interés) a nombre de cada persona.
+ * Así no parece que gastaste de más, y cuando te devuelven la plata entra como devolución (no como ingreso).
+ *
+ *  - Efectivo/débito: el movimiento baja a tu parte y cada persona queda como deuda (el dinero que salió de tu cuenta
+ *    sigue siendo el total: una parte es gasto, el resto es "por cobrar").
+ *  - Tarjeta: el estado de cuenta sigue cobrando el total (así lo cobra el banco); el gasto reconocido es tu parte y el
+ *    resto queda por cobrar.
+ *
+ * Marcas internas: el movimiento lleva en Notas "Dividido #ID (total X)" y cada deuda guarda el ID del movimiento
+ * en la columna "Division" (col. 14 de PrestamosOtorgados).
+ *
+ * a = { modo: 'igual'|'porcentaje'|'monto', personas: [{ nombre, pct?, monto? }] }
+ *   igual: el total se reparte en partes iguales entre tú y las personas (centavos sobrantes para ti).
+ *   porcentaje: cada persona paga pct % del total; tú te quedas con el resto.
+ *   monto: cada persona devuelve exactamente ese monto; tú te quedas con el resto.
+ */
+
+const RE_DIVIDIDO_ = /Dividido #(\w+) \(total ([\d.]+)\)/;
+
+function asegurarColumnaDivision_() {
+  asegurarColumnaConcepto_();
+  const h = getHoja_('PrestamosOtorgados');
+  if (h.getLastColumn() < 14) h.getRange(1, 14).setValue('Division');
+}
+
+/** "ana  perez" → "Ana Perez" (solo si lo escribieron todo en minúsculas; si ya trae mayúsculas se respeta) */
+function nombrePropio_(n) {
+  const t = String(n || '').trim().replace(/\s+/g, ' ');
+  if (t !== t.toLowerCase()) return t;
+  return t.replace(/(^|\s)(\S)/g, function (m, a, b) { return a + b.toUpperCase(); });
+}
+
+/** Calcula cuánto le toca a cada uno. Devuelve { yo, otros, personas: [{ nombre, monto }] } */
+function calcularDivision_(total, a) {
+  const personas = ((a && a.personas) || []).map(function (p) {
+    return { nombre: nombrePropio_(p.nombre), pct: p.pct, monto: p.monto };
+  });
+  if (!personas.length) throw new Error('Agrega al menos una persona para dividir el gasto.');
+  const vistos = {};
+  personas.forEach(function (p) {
+    if (!p.nombre) throw new Error('Escribe el nombre de cada persona.');
+    const k = normNombre_(p.nombre);
+    if (vistos[k]) throw new Error('"' + p.nombre + '" aparece dos veces.');
+    vistos[k] = true;
+  });
+  const modo = a.modo === 'porcentaje' || a.modo === 'monto' ? a.modo : 'igual';
+  let otros = 0;
+  if (modo === 'igual') {
+    const base = Math.floor(total / (personas.length + 1) * 100 + 1e-9) / 100;
+    personas.forEach(function (p) { p.monto = redondear_(base); otros += p.monto; });
+  } else {
+    personas.forEach(function (p) {
+      if (modo === 'porcentaje') {
+        const pc = numero_(p.pct);
+        if (!(pc > 0) || pc >= 100) throw new Error('El porcentaje de ' + p.nombre + ' debe estar entre 0 y 100.');
+        p.monto = redondear_(total * pc / 100);
+      } else {
+        p.monto = redondear_(numero_(p.monto));
+      }
+      if (!(p.monto > 0)) throw new Error('Escribe cuánto te debe devolver ' + p.nombre + '.');
+      otros += p.monto;
+    });
+  }
+  otros = redondear_(otros);
+  const yo = redondear_(total - otros);
+  if (yo < 0) throw new Error('Lo que te deben (' + otros + ') supera el total del gasto (' + total + ').');
+  if (yo === 0) throw new Error('Con esos montos tu parte queda en 0. Si el gasto fue entero para otra persona usa "Es para otra persona".');
+  return { yo: yo, otros: otros, personas: personas.map(function (p) { return { nombre: p.nombre, monto: p.monto }; }) };
+}
+
+function movimientoPorId_(id) {
+  const m = leerMovimientos_().filter(function (x) { return String(x.id) === String(id); })[0];
+  if (!m) throw new Error('Movimiento no encontrado.');
+  return m;
+}
+
+/** Aplica la división a un gasto ya registrado. Devuelve el resumen */
+function dividirMovimientoInterno_(movId, a) {
+  return conLock_(function () {
+    const m = movimientoPorId_(movId);
+    const clase = clasificarMovimiento_(m);
+    if (!esGasto_(m.tipo) || (clase !== 'normal' && clase !== 'tarjeta')) throw new Error('Solo se pueden dividir gastos normales o con tarjeta.');
+    if (RE_DIVIDIDO_.test(m.notas)) throw new Error('Este gasto ya está dividido.');
+    if (/Cuotas #\w+ \(\d+\/\d+\)/.test(m.notas)) throw new Error('Un gasto en cuotas no se puede dividir.');
+    if (clase === 'tarjeta') {
+      const tid = extraerRef_(m.notas, /Ref\. TarjetaCredito #(\d+)/);
+      const tarj = tid ? buscarFilaPorId_('TarjetaCredito', tid) : null;
+      if (tarj && String(tarj.fila[7]).trim() === 'Pagado') throw new Error('Ese consumo ya se pagó con un estado de cuenta: no se puede dividir.');
+    }
+    const total = m.monto;
+    const plan = calcularDivision_(total, a);
+    asegurarColumnaDivision_();
+    const hoja = getHoja_('Movimientos');
+    const marca = 'Dividido #' + m.id + ' (total ' + total + ')';
+
+    // 1) Mi parte: el gasto baja de total a lo mío. En efectivo/débito se devuelve a la cuenta lo ajeno,
+    //    que enseguida sale de nuevo como deuda de cada persona (el saldo de la cuenta no cambia).
+    if (clase === 'normal') actualizarSaldoCuenta_(m.cuentaId, plan.otros);
+    hoja.getRange(m.fila, M.MONTO + 1).setValue(plan.yo);
+    hoja.getRange(m.fila, M.NOTAS + 1).setValue(m.notas ? m.notas + ' · ' + marca : marca);
+
+    // 2) Lo ajeno: una deuda por persona
+    plan.personas.forEach(function (p) {
+      const persona = canonPersona_(p.nombre);
+      const id = registrarPrestamoOtorgado({
+        deudor: persona, moneda: m.moneda, montoPrestado: p.monto, tasaInteres: 0, plazoMeses: 1, fechaInicio: m.fecha,
+        concepto: m.descripcion || 'Gasto compartido', cuentaOrigenId: clase === 'normal' ? m.cuentaId : ''
+      });
+      const fila = buscarFilaPorId_('PrestamosOtorgados', id);
+      if (fila) getHoja_('PrestamosOtorgados').getRange(fila.numeroFila, 14).setValue(String(m.id));
+      p.nombre = persona;
+    });
+    registrarLog_('DividirGasto', '#' + m.id + ': total ' + total + ', mi parte ' + plan.yo + ', ' + plan.personas.length + ' persona(s)');
+    return { idMov: m.id, total: total, yo: plan.yo, personas: plan.personas };
+  });
+}
+
+/** Divide un gasto que ya está registrado. args = { id, modo, personas } */
+function api_registrarDivision(a) {
+  return dividirMovimientoInterno_(a.id, a);
+}
+
+/**
+ * Registra un gasto y lo divide en un solo paso. args = los de api_registrar + { division: { modo, personas } }
+ * Si algo falla al dividir, el gasto recién creado se deshace (no queda a medias).
+ */
+function api_registrarDividido(a) {
+  if (a.programar) throw new Error('Un gasto programado no se puede dividir: divídelo cuando se realice.');
+  if (a.clase && a.clase !== 'gasto') throw new Error('Solo se pueden dividir gastos.');
+  if (Number(a.cuotas) > 1) throw new Error('Un gasto en cuotas no se puede dividir.');
+  const div = a.division || {};
+  const total = validarMonto_(a.monto, 'El monto');
+  calcularDivision_(total, div); // valida antes de registrar nada
+  const args = {};
+  Object.keys(a).forEach(function (k) { args[k] = a[k]; });
+  args.clase = 'gasto';
+  const r = api_registrar(args);
+  if (r.programado || r.idMov === '' || r.idMov === undefined) throw new Error('Este gasto no se puede dividir.');
+  try {
+    const d = dividirMovimientoInterno_(r.idMov, div);
+    return { idMov: r.idMov, total: d.total, yo: d.yo, personas: d.personas };
+  } catch (e) {
+    try { eliminarMovimiento(r.idMov); } catch (x) { /* ignorar */ }
+    throw e;
+  }
+}
+
+/** Deudas (préstamos otorgados) que nacieron de la división de un movimiento */
+function deudasDeDivision_(movId) {
+  const out = [];
+  const po = leerHoja_('PrestamosOtorgados');
+  for (let i = 1; i < po.length; i++) {
+    if (po[i][0] === '' || po[i].length < 14 || String(po[i][13]) !== String(movId)) continue;
+    out.push({ id: po[i][0], nombre: String(po[i][1]), moneda: String(po[i][2]), monto: numero_(po[i][3]), saldo: numero_(po[i][10]), estado: String(po[i][9]).trim() });
+  }
+  return out;
+}
+
+/** Quita las deudas de una división (solo si nadie ha devuelto nada todavía) */
+function quitarDeudasDivision_(movId) {
+  const deudas = deudasDeDivision_(movId);
+  deudas.forEach(function (d) {
+    if (d.estado === 'Pagado' || Math.abs(d.saldo - d.monto) > 0.005) throw new Error(d.nombre + ' ya te devolvió parte de este gasto. Primero revierte ese cobro o cierra la deuda.');
+  });
+  deudas.forEach(function (d) {
+    leerMovimientos_().filter(function (x) { return new RegExp('Ref\\. PrestamoOtorgado #' + String(d.id) + '(\\D|$)').test(x.notas); })
+      .forEach(function (x) { borrarFilaMovimiento_(x.id); });
+    const f = buscarFilaPorId_('PrestamosOtorgados', d.id);
+    if (f) getHoja_('PrestamosOtorgados').deleteRow(f.numeroFila);
+  });
+  return deudas.length;
+}
+
+/** Deshace la división: el gasto vuelve a ser del total y se borran las deudas. args = { id } */
+function api_eliminarDivision(a) {
+  return conLock_(function () {
+    const m = movimientoPorId_(a.id);
+    const dv = String(m.notas).match(RE_DIVIDIDO_);
+    if (!dv) throw new Error('Este gasto no está dividido.');
+    const clase = clasificarMovimiento_(m);
+    const total = numero_(dv[2]);
+    const otros = redondear_(total - m.monto);
+    quitarDeudasDivision_(m.id);
+    if (clase === 'normal') actualizarSaldoCuenta_(m.cuentaId, -otros);
+    const hoja = getHoja_('Movimientos');
+    hoja.getRange(m.fila, M.MONTO + 1).setValue(total);
+    hoja.getRange(m.fila, M.NOTAS + 1).setValue(String(m.notas).replace(/ · Dividido #\w+ \(total [\d.]+\)/, '').replace(RE_DIVIDIDO_, '').trim());
+    registrarLog_('DeshacerDivision', '#' + m.id);
+    return true;
+  });
+}
+
+/** Para el detalle del movimiento: total, mi parte y cada persona con su estado */
+function detalleDivision_(m) {
+  const dv = String(m.notas).match(RE_DIVIDIDO_);
+  if (!dv) return null;
+  return { total: numero_(dv[2]), yo: m.monto, moneda: m.moneda, personas: deudasDeDivision_(m.id) };
 }
