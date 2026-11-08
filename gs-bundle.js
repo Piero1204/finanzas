@@ -1786,6 +1786,8 @@ function configurarWebhookTelegram() {
  * Se guarda el update_id: Telegram reintenta si tardas y así no se registra dos veces lo mismo.
  */
 function doPost(e) {
+  // Puerta de la app local (PWA): ver 29_ApiLocal.gs
+  if (e && e.parameter && e.parameter.api === '1') return apiHttp_(e);
   MODO_RESPUESTA_ = true;
   try { return doPostInterno_(e); } finally { MODO_RESPUESTA_ = false; }
 }
@@ -6755,4 +6757,567 @@ function detalleDivision_(m) {
   const dv = String(m.notas).match(RE_DIVIDIDO_);
   if (!dv) return null;
   return { total: numero_(dv[2]), yo: m.monto, moneda: m.moneda, personas: deudasDeDivision_(m.id) };
+}
+/* ==== 31_AnalistaIA.gs ==== */
+/**
+ * ============================================================
+ * ANALISTA FINANCIERO IA  +  PERFIL FINANCIERO
+ * ============================================================
+ * Arquitectura (la IA NO hace las cuentas):
+ *   1) La IA lee tu pregunta y decide qué herramientas de cálculo necesita (JSON).
+ *   2) Las herramientas (este archivo) calculan con tus movimientos reales: sumas, promedios, comparaciones,
+ *      anomalías, recurrentes, proyecciones y simulaciones. Son exactas y reproducibles.
+ *   3) La IA recibe SOLO esos resultados y los explica en lenguaje claro, sin inventar cifras.
+ * Son 2 llamadas a la IA por pregunta (cabe en la cuota gratuita de Gemini).
+ *
+ * Importes: todo se compara en soles equivalentes (tipo de cambio referencial actual), salvo que la herramienta diga otra cosa.
+ * El perfil financiero (api_perfil) usa reglas transparentes —no un puntaje inventado— y la IA solo lo redacta.
+ * Este módulo solo LEE datos: nunca crea, edita ni borra nada.
+ */
+
+// ---------------------------------------------------------------
+// BASE DE DATOS DE ANÁLISIS
+// ---------------------------------------------------------------
+
+var ANA_ = null;
+
+/** Movimientos reales (ya ocurridos) de ingreso/gasto, normalizados y en soles equivalentes */
+function anaBase_() {
+  if (ANA_) return ANA_;
+  const tasa = obtenerUltimaTasaReferencial_();
+  const ahora = new Date();
+  const nombres = {};
+  try { obtenerCuentasActivas_().concat(cuentasArchivadas_()).forEach(function (c) { nombres[String(c.id)] = c.banco; }); } catch (e) { /* opcional */ }
+  const lista = [];
+  leerMovimientos_().forEach(function (m) {
+    if (m.efectiva > ahora) return;
+    const g = esGasto_(m.tipo), i = esIngreso_(m.tipo);
+    if (!g && !i) return;
+    lista.push({
+      id: m.id, f: m.efectiva, ing: i, tipo: m.tipo, cat: String(m.categoria || 'Sin categoría'), sub: String(m.subcategoria || ''),
+      desc: String(m.descripcion || ''), medio: m.medio || '', cuenta: m.cuentaId !== '' ? (nombres[String(m.cuentaId)] || '') : (m.medio === 'Tarjeta de Credito' ? 'Tarjeta' : ''),
+      pen: convertirAPEN_(m.monto, m.moneda, tasa), monto: m.monto, mon: m.moneda, dividido: RE_DIVIDIDO_.test(m.notas)
+    });
+  });
+  ANA_ = { lista: lista, tasa: tasa, ahora: ahora, nombres: nombres };
+  return ANA_;
+}
+
+function anaN_(n) { return Math.round(Number(n) * 100) / 100; }
+function anaIso_(d) { return fechaISO_(d); }
+function anaInicioMes_(d, delta) { return new Date(d.getFullYear(), d.getMonth() + (delta || 0), 1); }
+function anaFinMes_(d, delta) { return new Date(d.getFullYear(), d.getMonth() + (delta || 0) + 1, 0, 23, 59, 59); }
+function anaClaveMes_(d) { return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2); }
+function anaNorm_(t) { return String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim(); }
+
+/** Rango de fechas desde args: periodo (atajo) o desde/hasta (AAAA-MM-DD). Por defecto, últimos 90 días. */
+function anaRango_(a) {
+  const hoy = new Date();
+  const fin0 = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate(), 23, 59, 59);
+  const p = String((a && a.periodo) || '').toLowerCase();
+  const dias = function (n) { return { desde: new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - n + 1), hasta: fin0, etiqueta: 'últimos ' + n + ' días' }; };
+  if (a && a.desde) {
+    const d = fecha_(a.desde), h = a.hasta ? fecha_(a.hasta) : null;
+    if (d) {
+      const hasta = h ? new Date(h.getFullYear(), h.getMonth(), h.getDate(), 23, 59, 59) : fin0;
+      return { desde: new Date(d.getFullYear(), d.getMonth(), d.getDate()), hasta: hasta, etiqueta: anaIso_(d) + ' a ' + anaIso_(hasta) };
+    }
+  }
+  if (p === 'este_mes') return { desde: anaInicioMes_(hoy), hasta: fin0, etiqueta: 'este mes' };
+  if (p === 'mes_pasado') return { desde: anaInicioMes_(hoy, -1), hasta: anaFinMes_(hoy, -1), etiqueta: 'mes pasado' };
+  if (p === 'ultimos_7') return dias(7);
+  if (p === 'ultimos_30') return dias(30);
+  if (p === 'ultimos_180') return dias(180);
+  if (p === 'ultimos_365') return dias(365);
+  if (p === 'este_ano') return { desde: new Date(hoy.getFullYear(), 0, 1), hasta: fin0, etiqueta: 'este año' };
+  if (p === 'ano_pasado') return { desde: new Date(hoy.getFullYear() - 1, 0, 1), hasta: new Date(hoy.getFullYear() - 1, 11, 31, 23, 59, 59), etiqueta: 'año pasado' };
+  if (p === 'todo') return { desde: new Date(2000, 0, 1), hasta: fin0, etiqueta: 'todo el historial' };
+  return dias(90);
+}
+
+function anaFiltrar_(a, rango) {
+  const base = anaBase_().lista;
+  const tipo = String((a && a.tipo) || '').toLowerCase();
+  const cat = a && a.categoria ? anaNorm_(a.categoria) : '';
+  const sub = a && a.subcategoria ? anaNorm_(a.subcategoria) : '';
+  const txt = a && a.texto ? anaNorm_(a.texto) : '';
+  const cuenta = a && a.cuenta ? anaNorm_(a.cuenta) : '';
+  const mn = a && a.monto_min !== undefined && a.monto_min !== '' ? Number(a.monto_min) : null;
+  const mx = a && a.monto_max !== undefined && a.monto_max !== '' ? Number(a.monto_max) : null;
+  return base.filter(function (m) {
+    if (m.f < rango.desde || m.f > rango.hasta) return false;
+    if (tipo === 'gasto' && m.ing) return false;
+    if (tipo === 'ingreso' && !m.ing) return false;
+    if (cat && anaNorm_(m.cat).indexOf(cat) === -1) return false;
+    if (sub && anaNorm_(m.sub).indexOf(sub) === -1) return false;
+    if (txt && (anaNorm_(m.desc) + ' ' + anaNorm_(m.cat) + ' ' + anaNorm_(m.sub)).indexOf(txt) === -1) return false;
+    if (cuenta && anaNorm_(m.cuenta).indexOf(cuenta) === -1) return false;
+    if (mn !== null && m.pen < mn) return false;
+    if (mx !== null && m.pen > mx) return false;
+    return true;
+  });
+}
+
+function anaSuma_(l) { return l.reduce(function (s, m) { return s + m.pen; }, 0); }
+function anaMediana_(v) { if (!v.length) return 0; const s = v.slice().sort(function (a, b) { return a - b; }); const k = Math.floor(s.length / 2); return s.length % 2 ? s[k] : (s[k - 1] + s[k]) / 2; }
+function anaMedia_(v) { return v.length ? v.reduce(function (s, x) { return s + x; }, 0) / v.length : 0; }
+function anaDesv_(v) { if (v.length < 2) return 0; const m = anaMedia_(v); return Math.sqrt(v.reduce(function (s, x) { return s + Math.pow(x - m, 2); }, 0) / v.length); }
+
+var DIAS_ES_ = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+
+function anaClave_(m, por) {
+  if (por === 'subcategoria') return m.cat + ' › ' + (m.sub || '(sin subcategoría)');
+  if (por === 'cuenta') return m.cuenta || '(sin cuenta)';
+  if (por === 'medio') return m.medio || '(sin medio)';
+  if (por === 'dia_semana') return DIAS_ES_[m.f.getDay()];
+  if (por === 'mes') return anaClaveMes_(m.f);
+  if (por === 'descripcion') return anaNorm_(m.desc) || '(sin descripción)';
+  if (por === 'tipo') return m.tipo;
+  return m.cat;
+}
+
+/** Totales por mes de un filtro: { 'AAAA-MM': {ingresos, gastos} } para los últimos n meses completos + el actual */
+function anaPorMes_(n) {
+  const hoy = new Date(), out = [], idx = {};
+  for (let k = n - 1; k >= 0; k--) {
+    const d = anaInicioMes_(hoy, -k);
+    const o = { mes: anaClaveMes_(d), ingresos: 0, gastos: 0, parcial: k === 0 };
+    idx[o.mes] = o; out.push(o);
+  }
+  anaBase_().lista.forEach(function (m) {
+    const o = idx[anaClaveMes_(m.f)];
+    if (!o) return;
+    if (m.ing) o.ingresos += m.pen; else o.gastos += m.pen;
+  });
+  out.forEach(function (o) { o.ingresos = anaN_(o.ingresos); o.gastos = anaN_(o.gastos); o.ahorro = anaN_(o.ingresos - o.gastos); });
+  return out;
+}
+
+// ---------------------------------------------------------------
+// HERRAMIENTAS (todas devuelven JSON pequeño y exacto)
+// ---------------------------------------------------------------
+
+function toolResumen_(a) {
+  const r = anaRango_(a), l = anaFiltrar_(a, r);
+  const ing = l.filter(function (m) { return m.ing; }), gas = l.filter(function (m) { return !m.ing; });
+  const I = anaSuma_(ing), G = anaSuma_(gas);
+  const dias = Math.max(1, Math.round((Math.min(r.hasta, new Date()) - r.desde) / 86400000) + 1);
+  return {
+    periodo: r.etiqueta, desde: anaIso_(r.desde), hasta: anaIso_(r.hasta < new Date() ? r.hasta : new Date()),
+    ingresos: anaN_(I), gastos: anaN_(G), ahorro: anaN_(I - G), tasaAhorroPct: I > 0 ? anaN_((I - G) / I * 100) : null,
+    movimientosIngreso: ing.length, movimientosGasto: gas.length,
+    gastoPromedioDiario: anaN_(G / dias), gastoPromedioPorMovimiento: gas.length ? anaN_(G / gas.length) : 0,
+    ingresoPasivoPct: I > 0 ? anaN_(anaSuma_(ing.filter(function (m) { return m.tipo === 'Ingreso Pasivo'; })) / I * 100) : null,
+    nota: 'Importes en soles equivalentes.'
+  };
+}
+
+function toolAgrupar_(a) {
+  const r = anaRango_(a), l = anaFiltrar_(a, r);
+  const por = String(a.agrupar || 'categoria');
+  const g = {};
+  l.forEach(function (m) { const k = anaClave_(m, por); if (!g[k]) g[k] = { total: 0, n: 0, max: 0 }; g[k].total += m.pen; g[k].n++; g[k].max = Math.max(g[k].max, m.pen); });
+  const total = anaSuma_(l);
+  let filas = Object.keys(g).map(function (k) { return { grupo: k, total: anaN_(g[k].total), movimientos: g[k].n, promedio: anaN_(g[k].total / g[k].n), mayor: anaN_(g[k].max), pct: total > 0 ? anaN_(g[k].total / total * 100) : 0 }; });
+  if (por === 'mes') filas.sort(function (x, y) { return x.grupo < y.grupo ? -1 : 1; }); else filas.sort(function (x, y) { return y.total - x.total; });
+  const top = Math.min(Math.max(Number(a.top) || 12, 1), 30);
+  return { periodo: r.etiqueta, agrupadoPor: por, tipo: a.tipo || 'todos', totalGeneral: anaN_(total), movimientos: l.length, filas: filas.slice(0, top), gruposOmitidos: Math.max(0, filas.length - top) };
+}
+
+function toolSerieMensual_(a) {
+  const n = Math.min(Math.max(Number(a.meses) || 12, 2), 36);
+  const s = anaPorMes_(n);
+  const completos = s.filter(function (x) { return !x.parcial; });
+  return {
+    meses: s, nota: 'El último mes es parcial (aún en curso).',
+    promedioIngresos: anaN_(anaMedia_(completos.map(function (x) { return x.ingresos; }))),
+    promedioGastos: anaN_(anaMedia_(completos.map(function (x) { return x.gastos; }))),
+    mejorMes: completos.length ? completos.slice().sort(function (x, y) { return y.ahorro - x.ahorro; })[0].mes : null,
+    peorMes: completos.length ? completos.slice().sort(function (x, y) { return x.ahorro - y.ahorro; })[0].mes : null
+  };
+}
+
+function toolComparar_(a) {
+  const ra = anaRango_({ periodo: a.periodo_a, desde: a.a_desde, hasta: a.a_hasta });
+  const rb = anaRango_({ periodo: a.periodo_b, desde: a.b_desde, hasta: a.b_hasta });
+  const por = String(a.agrupar || 'categoria');
+  const tipo = a.tipo || 'gasto';
+  const f = function (r) { const l = anaFiltrar_({ tipo: tipo, categoria: a.categoria, texto: a.texto, cuenta: a.cuenta }, r); const g = {}; l.forEach(function (m) { const k = anaClave_(m, por); g[k] = (g[k] || 0) + m.pen; }); return { total: anaSuma_(l), g: g, n: l.length }; };
+  const A = f(ra), B = f(rb);
+  const claves = {}; Object.keys(A.g).concat(Object.keys(B.g)).forEach(function (k) { claves[k] = 1; });
+  const filas = Object.keys(claves).map(function (k) {
+    const x = A.g[k] || 0, y = B.g[k] || 0;
+    return { grupo: k, a: anaN_(x), b: anaN_(y), diferencia: anaN_(x - y), cambioPct: y > 0 ? anaN_((x / y - 1) * 100) : null };
+  }).sort(function (p, q) { return Math.abs(q.diferencia) - Math.abs(p.diferencia); }).slice(0, 12);
+  return {
+    periodoA: ra.etiqueta + ' (' + anaIso_(ra.desde) + ' a ' + anaIso_(ra.hasta) + ')', periodoB: rb.etiqueta + ' (' + anaIso_(rb.desde) + ' a ' + anaIso_(rb.hasta) + ')',
+    tipo: tipo, totalA: anaN_(A.total), totalB: anaN_(B.total), diferencia: anaN_(A.total - B.total), cambioPct: B.total > 0 ? anaN_((A.total / B.total - 1) * 100) : null,
+    agrupadoPor: por, mayoresCambios: filas, nota: 'A = periodo más reciente a comparar, B = periodo de referencia. Si un periodo es más corto, la comparación no es pareja.'
+  };
+}
+
+function toolBuscar_(a) {
+  const r = anaRango_(a.desde || a.periodo ? a : { periodo: 'todo' });
+  const l = anaFiltrar_(a, r).sort(function (x, y) { return y.f - x.f; });
+  const lim = Math.min(Math.max(Number(a.limite) || 15, 1), 40);
+  return {
+    coincidencias: l.length, total: anaN_(anaSuma_(l)), periodo: r.etiqueta,
+    movimientos: l.slice(0, lim).map(function (m) { return { fecha: anaIso_(m.f), tipo: m.ing ? 'ingreso' : 'gasto', monto: m.monto, moneda: m.mon, equivalentePEN: anaN_(m.pen), categoria: m.cat, subcategoria: m.sub, descripcion: m.desc, cuenta: m.cuenta }; })
+  };
+}
+
+/** Pagos que se repiten (suscripciones, servicios, cuotas): 3+ meses distintos en los últimos 8 */
+function recurrentes_() {
+  const desde = anaInicioMes_(new Date(), -7);
+  const g = {};
+  anaBase_().lista.forEach(function (m) {
+    if (m.ing || m.f < desde) return;
+    const k = anaNorm_(m.desc) || anaNorm_(m.cat + ' ' + m.sub);
+    if (!k) return;
+    if (!g[k]) g[k] = { nombre: m.desc || (m.cat + ' ' + m.sub), cat: m.cat, meses: {}, montos: [], ult: m.f, pu: m.pen };
+    const mes = anaClaveMes_(m.f);
+    if (!g[k].meses[mes]) { g[k].meses[mes] = 0; g[k].montos.push({ f: m.f, v: m.pen }); }
+    g[k].meses[mes] += m.pen;
+    if (m.f >= g[k].ult) { g[k].ult = m.f; g[k].pu = m.pen; }
+  });
+  const out = [];
+  Object.keys(g).forEach(function (k) {
+    const x = g[k], meses = Object.keys(x.meses);
+    if (meses.length < 3) return;
+    const vals = meses.map(function (mm) { return x.meses[mm]; });
+    const media = anaMedia_(vals), cv = media > 0 ? anaDesv_(vals) / media : 0;
+    if (cv > 0.15) return;   // importes muy distintos cada mes: no es un pago fijo
+    const ord = x.montos.slice().sort(function (p, q) { return p.f - q.f; });
+    const primero = ord[0].v, ultimo = ord[ord.length - 1].v;
+    out.push({ pago: x.nombre, categoria: x.cat, mesesConPago: meses.length, promedioMensual: anaN_(media), ultimoPago: anaN_(x.pu), ultimaFecha: anaIso_(x.ult), subioPct: primero > 0 && ultimo > primero * 1.05 ? anaN_((ultimo / primero - 1) * 100) : 0, costoAnualEstimado: anaN_(media * 12) });
+  });
+  out.sort(function (p, q) { return q.promedioMensual - p.promedioMensual; });
+  return out;
+}
+
+function toolRecurrentes_() {
+  const l = recurrentes_();
+  return { pagos: l.slice(0, 20), totalMensualEstimado: anaN_(l.reduce(function (s, x) { return s + x.promedioMensual; }, 0)), totalAnualEstimado: anaN_(l.reduce(function (s, x) { return s + x.costoAnualEstimado; }, 0)), nota: 'Detectados por repetición en 3+ meses con importe parecido; revisa que sean realmente pagos fijos.' };
+}
+
+/** Señales para revisar (no son acusaciones): montos atípicos, posibles duplicados, categorías disparadas */
+function anomalias_(rango) {
+  const base = anaBase_().lista.filter(function (m) { return !m.ing; });
+  const out = [];
+  const porCat = {};
+  base.forEach(function (m) { (porCat[m.cat] = porCat[m.cat] || []).push(m); });
+  Object.keys(porCat).forEach(function (c) {
+    const l = porCat[c];
+    if (l.length < 6) return;
+    const v = l.map(function (m) { return m.pen; });
+    const med = anaMediana_(v), media = anaMedia_(v), sd = anaDesv_(v);
+    l.forEach(function (m) {
+      if (m.f < rango.desde || m.f > rango.hasta) return;
+      if (m.pen >= 50 && m.pen > Math.max(med * 3, media + 2.5 * sd)) out.push({ tipo: 'monto atípico', fecha: anaIso_(m.f), descripcion: m.desc || m.cat, categoria: c, monto: anaN_(m.pen), tipicoEnCategoria: anaN_(med), id: m.id });
+    });
+  });
+  const vistos = {};
+  base.forEach(function (m) {
+    if (m.f < rango.desde || m.f > rango.hasta) return;
+    const k = anaNorm_(m.desc) + '|' + anaN_(m.pen);
+    (vistos[k] = vistos[k] || []).push(m);
+  });
+  Object.keys(vistos).forEach(function (k) {
+    const l = vistos[k].sort(function (p, q) { return p.f - q.f; });
+    for (let i = 1; i < l.length; i++) {
+      if (l[i].pen >= 10 && (l[i].f - l[i - 1].f) <= 2 * 86400000) { out.push({ tipo: 'posible duplicado', fecha: anaIso_(l[i].f), descripcion: l[i].desc || l[i].cat, monto: anaN_(l[i].pen), fechaAnterior: anaIso_(l[i - 1].f), id: l[i].id }); break; }
+    }
+  });
+  // categorías que se dispararon este mes frente a su promedio de los 3 meses anteriores
+  const hoy = new Date(), mesAct = anaClaveMes_(hoy), prev = [1, 2, 3].map(function (k) { return anaClaveMes_(anaInicioMes_(hoy, -k)); });
+  const tab = {};
+  base.forEach(function (m) { const mm = anaClaveMes_(m.f); if (mm !== mesAct && prev.indexOf(mm) === -1) return; tab[m.cat] = tab[m.cat] || { act: 0, ant: 0 }; if (mm === mesAct) tab[m.cat].act += m.pen; else tab[m.cat].ant += m.pen / 3; });
+  const dia = hoy.getDate() / ultimoDiaMes_(hoy);
+  Object.keys(tab).forEach(function (c) {
+    const t = tab[c];
+    if (t.ant >= 80 && t.act > t.ant * 1.5 && t.act - t.ant >= 100 && dia >= 0.3) out.push({ tipo: 'categoría disparada', categoria: c, esteMes: anaN_(t.act), promedio3Meses: anaN_(t.ant), subePct: anaN_((t.act / t.ant - 1) * 100) });
+  });
+  return out;
+}
+
+function toolAnomalias_(a) {
+  const r = anaRango_(a.desde || a.periodo ? a : { periodo: 'ultimos_90' });
+  const l = anomalias_(r);
+  return { periodo: r.etiqueta, senales: l.slice(0, 15), nota: 'Son señales para REVISAR, no prueba de error ni fraude.' };
+}
+
+function toolEstado_() {
+  const tasa = anaBase_().tasa;
+  const cuentas = obtenerCuentasActivas_().map(function (c) { return { cuenta: c.banco, tipo: c.tipo, moneda: c.moneda, saldo: c.saldo, equivalentePEN: anaN_(convertirAPEN_(c.saldo, c.moneda, tasa)) }; });
+  const out = { tipoCambio: { usdPen: tasa.usdPen, eurPen: tasa.eurPen, respaldo: !!tasa.respaldo }, cuentas: cuentas, patrimonioDetallePEN: calcularPatrimonioDetalle_() };
+  const liquidoPorMoneda = {};
+  cuentas.forEach(function (c) { if (c.tipo !== 'Inversion') liquidoPorMoneda[c.moneda] = anaN_((liquidoPorMoneda[c.moneda] || 0) + c.saldo); });
+  out.liquidoPorMoneda = liquidoPorMoneda;
+  try { const c = contextoAsesor_(); out.tarjetas = c.tarjetas; out.tarjetaPendiente = c.tarjetaPendiente; out.presupuestos = c.presupuestos; out.metas = c.metas; out.proximosMovimientos = c.proximosMovimientos; out.posicionesBolsa = c.posicionesBolsa; out.inversiones = c.inversiones; } catch (e) { /* opcional */ }
+  try {
+    const po = leerHoja_('PrestamosOtorgados'), porCobrar = [];
+    for (let i = 1; i < po.length; i++) if (po[i][0] !== '' && String(po[i][9]).trim() !== 'Pagado') porCobrar.push({ persona: String(po[i][1]), moneda: String(po[i][2]), saldo: numero_(po[i][10]), desde: String(po[i][5] ? fechaISO_(fecha_(po[i][5]) || new Date()) : '') });
+    out.meDeben = porCobrar.slice(0, 30);
+  } catch (e) { /* opcional */ }
+  return out;
+}
+
+/** Simula cuánto efectivo tendrías mes a mes. Parte de tu promedio real de los últimos 3 meses completos */
+function toolSimular_(a) {
+  const serie = anaPorMes_(7).filter(function (x) { return !x.parcial; }).slice(-3);
+  const ing0 = anaMedia_(serie.map(function (x) { return x.ingresos; })), gas0 = anaMedia_(serie.map(function (x) { return x.gastos; }));
+  const tasa = anaBase_().tasa;
+  let liquido = 0;
+  obtenerCuentasActivas_().forEach(function (c) { if (c.tipo !== 'Inversion') liquido += convertirAPEN_(c.saldo, c.moneda, tasa); });
+  const n = Math.min(Math.max(Number(a.meses) || 12, 1), 36);
+  const dI = Number(a.ingresos_pct) || 0, mI = Number(a.ingresos_monto) || 0, dG = Number(a.gastos_pct) || 0, mG = Number(a.gastos_monto) || 0;
+  const sinIng = Number(a.sin_ingresos_meses) || 0, unico = Number(a.gasto_unico) || 0, mesUnico = Math.min(Math.max(Number(a.mes_gasto_unico) || 1, 1), n);
+  const rend = (Number(a.rendimiento_anual_pct) || 0) / 100 / 12;
+  const ing1 = ing0 * (1 + dI / 100) + mI, gas1 = gas0 * (1 + dG / 100) + mG;
+  const meses = [];
+  let sBase = liquido, sEsc = liquido, minEsc = liquido, mesNeg = null;
+  for (let k = 1; k <= n; k++) {
+    sBase += ing0 - gas0;
+    sEsc = sEsc * (1 + rend) + (k <= sinIng ? 0 : ing1) - gas1 - (k === mesUnico ? unico : 0);
+    if (sEsc < minEsc) minEsc = sEsc;
+    if (sEsc < 0 && mesNeg === null) mesNeg = k;
+    if (k <= 12 || k === n) meses.push({ mes: k, escenario: anaN_(sEsc), sinCambios: anaN_(sBase) });
+  }
+  return {
+    base: { ingresoMensualPromedio: anaN_(ing0), gastoMensualPromedio: anaN_(gas0), ahorroMensualPromedio: anaN_(ing0 - gas0), efectivoActualPEN: anaN_(liquido), mesesUsados: serie.map(function (x) { return x.mes; }) },
+    escenario: { ingresoMensual: anaN_(ing1), gastoMensual: anaN_(gas1), ahorroMensual: anaN_(ing1 - gas1), sinIngresosMeses: sinIng, gastoUnico: unico, mesGastoUnico: unico ? mesUnico : null, rendimientoAnualPct: Number(a.rendimiento_anual_pct) || 0 },
+    resultado: { efectivoAlFinal: anaN_(sEsc), efectivoAlFinalSinCambios: anaN_(sBase), diferencia: anaN_(sEsc - sBase), saldoMinimo: anaN_(minEsc), primerMesEnNegativo: mesNeg, meses: n },
+    proyeccion: meses, nota: 'Estimación lineal con tus promedios; no incluye estacionalidad, ni pagos de tarjeta pendientes, ni programados. El efectivo cuenta cuentas no-inversión en soles equivalentes.'
+  };
+}
+
+function toolMeta_(a) {
+  const meta = Number(a.meta), ahorro = Number(a.ahorro_mensual);
+  const serie = anaPorMes_(7).filter(function (x) { return !x.parcial; }).slice(-3);
+  const prom = anaMedia_(serie.map(function (x) { return x.ahorro; }));
+  const aporte = ahorro > 0 ? ahorro : prom;
+  const actual = Number(a.actual) || 0;
+  if (!(meta > 0)) return { error: 'Falta el monto de la meta.' };
+  if (!(aporte > 0)) return { error: 'Con tu ahorro mensual actual (' + anaN_(prom) + ') no se llega a la meta: no hay ahorro positivo.', ahorroMensualPromedio: anaN_(prom) };
+  const meses = Math.ceil(Math.max(meta - actual, 0) / aporte);
+  return { meta: meta, yaTienes: actual, aporteMensualUsado: anaN_(aporte), ahorroMensualRealPromedio: anaN_(prom), mesesParaLlegar: meses, anios: anaN_(meses / 12), nota: 'Sin rendimiento ni inflación.' };
+}
+
+var HERRAMIENTAS_ = {
+  resumen: { f: toolResumen_, d: 'Ingresos, gastos, ahorro, tasa de ahorro, promedios de un periodo (acepta filtros categoria, texto, cuenta, tipo). args: periodo|desde,hasta' },
+  agrupar: { f: toolAgrupar_, d: 'Totales agrupados. args: agrupar = categoria|subcategoria|cuenta|medio|dia_semana|mes|descripcion|tipo, tipo = gasto|ingreso, periodo|desde,hasta, categoria, texto, cuenta, monto_min, monto_max, top' },
+  serie_mensual: { f: toolSerieMensual_, d: 'Ingresos, gastos y ahorro mes a mes, mejor y peor mes. args: meses (2-36)' },
+  comparar: { f: toolComparar_, d: 'Compara dos periodos y muestra qué cambió más. args: periodo_a|a_desde,a_hasta, periodo_b|b_desde,b_hasta, tipo = gasto|ingreso, agrupar, categoria, texto' },
+  buscar: { f: toolBuscar_, d: 'Busca movimientos concretos y suma lo que encuentre (por comercio, persona, viaje, palabra). args: texto, categoria, subcategoria, cuenta, tipo, periodo|desde,hasta, monto_min, monto_max, limite' },
+  recurrentes: { f: toolRecurrentes_, d: 'Pagos fijos y suscripciones detectados, su costo mensual/anual y si subieron de precio. Sin args' },
+  anomalias: { f: toolAnomalias_, d: 'Montos atípicos, posibles duplicados, categorías disparadas. args: periodo|desde,hasta' },
+  estado_actual: { f: toolEstado_, d: 'FOTO DE HOY: saldos por cuenta y moneda, patrimonio, tarjetas, presupuestos, metas, próximos pagos, inversiones, quién me debe. Sin args' },
+  simular: { f: toolSimular_, d: 'Escenarios hipotéticos y proyección de efectivo. args: meses, ingresos_pct, ingresos_monto, gastos_pct, gastos_monto, sin_ingresos_meses, gasto_unico, mes_gasto_unico, rendimiento_anual_pct' },
+  meta: { f: toolMeta_, d: 'Cuánto tardas en juntar un monto. args: meta, actual, ahorro_mensual (opcional: usa tu ahorro real)' }
+};
+
+function ejecutarHerramienta_(nombre, args) {
+  const h = HERRAMIENTAS_[nombre];
+  if (!h) return { error: 'Herramienta desconocida: ' + nombre };
+  try { return h.f(args || {}); } catch (e) { return { error: e.message }; }
+}
+
+// ---------------------------------------------------------------
+// ANALISTA (chat con herramientas)
+// ---------------------------------------------------------------
+
+function anaCatalogoTexto_() {
+  return Object.keys(HERRAMIENTAS_).map(function (k) { return '- ' + k + ': ' + HERRAMIENTAS_[k].d; }).join('\n');
+}
+
+function anaCategoriasTexto_() {
+  try {
+    const top = {};
+    anaBase_().lista.forEach(function (m) { if (!m.ing) top[m.cat] = (top[m.cat] || 0) + m.pen; });
+    return Object.keys(top).sort(function (a, b) { return top[b] - top[a]; }).slice(0, 25).join(', ');
+  } catch (e) { return ''; }
+}
+
+function anaPlan_(mensajes) {
+  const hoy = new Date();
+  const system = 'Eres el planificador de un analista financiero personal. Decides qué herramientas de cálculo hacen falta para responder la última pregunta del usuario con SUS datos reales. ' +
+    'Hoy es ' + fechaISO_(hoy) + ' (' + DIAS_ES_[hoy.getDay()] + '). Las fechas van como AAAA-MM-DD. Si no dice periodo, usa periodo "ultimos_90" para análisis y "ultimos_365" para tendencias.\n' +
+    'Herramientas:\n' + anaCatalogoTexto_() + '\n' +
+    'Periodos válidos: este_mes, mes_pasado, ultimos_7, ultimos_30, ultimos_90, ultimos_180, ultimos_365, este_ano, ano_pasado, todo.\n' +
+    'Categorías de gasto del usuario (por monto): ' + anaCategoriasTexto_() + '\n' +
+    'Reglas: usa de 1 a 4 herramientas; para decisiones de compra o viaje combina estado_actual + serie_mensual + simular (gasto_unico) + recurrentes. ' +
+    'Para preguntas sobre un comercio, persona o viaje usa buscar. Usa el contexto de la conversación para entender preguntas cortas ("¿y el año pasado?"). ' +
+    'Si es un saludo o algo que no necesita datos, devuelve la lista vacía. No inventes herramientas. ' +
+    'Responde SOLO con JSON: {"herramientas":[{"nombre":"","args":{}}]}';
+  const conv = mensajes.slice(-6).map(function (m) { return (m.rol === 'asesor' ? 'ASISTENTE: ' : 'USUARIO: ') + m.texto; }).join('\n');
+  const j = extraerJSON_(iaTexto_(system, conv, 700));
+  return (Array.isArray(j.herramientas) ? j.herramientas : []).filter(function (h) { return h && HERRAMIENTAS_[h.nombre]; }).slice(0, 4);
+}
+
+var SYSTEM_ANALISTA_ = 'Eres el analista financiero personal del usuario (vive en Trujillo, Perú; soles, dólares y euros). ' +
+  'Recibes RESULTADOS DE CÁLCULO hechos sobre sus movimientos reales. Habla en español directo y profesional: sin halagos, sin suavizar, sin relleno. ' +
+  'REGLAS: (1) Usa únicamente cifras que aparezcan en los resultados; no inventes ni recalcules de memoria; si algo no está, di qué dato falta. ' +
+  '(2) Indica el periodo y la moneda de cada cifra (los importes están en soles equivalentes salvo que se diga otra cosa). ' +
+  '(3) Distingue siempre entre DATO (lo registrado), ESTIMACIÓN/PROYECCIÓN (cálculo con supuestos) y OPINIÓN o recomendación. Las proyecciones no son garantías. ' +
+  '(4) Una anomalía es una señal para revisar, no una acusación; un patrón observado no prueba una causa. ' +
+  '(5) Si hay pocos datos, dilo. Si el tipo de cambio es de respaldo, adviértelo. ' +
+  '(6) Respuesta corta y accionable: máximo 200 palabras salvo que pida un informe; usa **negritas** para cifras clave y viñetas "- " solo si ayudan. Cierra con el siguiente paso concreto cuando aplique. ' +
+  '(7) Para inversiones y bolsa habla de riesgos y horizonte, sin prometer rentabilidad. No ejecutas operaciones: solo analizas y sugieres.';
+
+function api_analista(a) {
+  const prov = iaProveedor_();
+  if (!prov) throw new Error('Para hablar con el analista agrega GEMINI_API_KEY (gratis en aistudio.google.com/apikey) o ANTHROPIC_API_KEY en las propiedades del script.');
+  const mensajes = (Array.isArray(a.mensajes) ? a.mensajes : []).slice(-10).map(function (m) {
+    return { rol: m.rol === 'asesor' ? 'asesor' : 'user', texto: String(m.texto || '').substring(0, 1500) };
+  }).filter(function (m) { return m.texto.trim(); });
+  if (!mensajes.length || mensajes[mensajes.length - 1].rol !== 'user') throw new Error('Escribe tu pregunta.');
+  ANA_ = null;
+
+  let plan = [], planError = '';
+  try { plan = anaPlan_(mensajes); } catch (e) { planError = e.message; }
+  const resultados = plan.map(function (h) { return { herramienta: h.nombre, args: h.args || {}, resultado: ejecutarHerramienta_(h.nombre, h.args) }; });
+  if (!resultados.length && planError) resultados.push({ herramienta: 'estado_actual', args: {}, resultado: ejecutarHerramienta_('estado_actual', {}) });   // plan B: foto de hoy
+
+  const system = SYSTEM_ANALISTA_ + '\n\nFecha de hoy: ' + fechaISO_(new Date()) + '.' + (anaBase_().tasa.respaldo ? ' AVISO: el tipo de cambio es de respaldo.' : '') +
+    '\n\nRESULTADOS DE CÁLCULO (JSON):\n' + (resultados.length ? JSON.stringify(resultados).substring(0, 24000) : '(ninguno: la pregunta no necesitó datos)');
+  const conv = mensajes.map(function (m) { return (m.rol === 'asesor' ? 'ASISTENTE: ' : 'USUARIO: ') + m.texto; }).join('\n') + '\nASISTENTE:';
+  const texto = iaTexto_(system, conv, 1100);
+  ANA_ = null;
+  return {
+    respuesta: String(texto).trim().replace(/^ASISTENTE:\s*/i, ''), proveedor: prov,
+    herramientas: resultados.map(function (r) { return { nombre: r.herramienta, args: r.args }; }), avisoPlan: planError
+  };
+}
+
+// ---------------------------------------------------------------
+// PERFIL FINANCIERO
+// ---------------------------------------------------------------
+
+/** Indicadores con semáforo y fórmula explicada. nivel: ok | atencion | alerta | info */
+function indicadoresPerfil_() {
+  ANA_ = null;
+  const base = anaBase_(), tasa = base.tasa, hoy = new Date();
+  const serie = anaPorMes_(7).filter(function (x) { return !x.parcial; }).slice(-6).filter(function (x) { return x.ingresos > 0 || x.gastos > 0; });
+  const out = { meses: serie.length, indicadores: [] };
+  const add = function (id, titulo, valor, texto, nivel, formula) { out.indicadores.push({ id: id, titulo: titulo, valor: valor, texto: texto, nivel: nivel, formula: formula }); };
+  if (serie.length < 2) { out.pocos = true; return out; }
+
+  const I = serie.map(function (x) { return x.ingresos; }), G = serie.map(function (x) { return x.gastos; });
+  const iT = anaSuma_([]) + I.reduce(function (s, x) { return s + x; }, 0), gT = G.reduce(function (s, x) { return s + x; }, 0);
+  const tAh = iT > 0 ? (iT - gT) / iT * 100 : null;
+  out.tasaAhorro = tAh;
+  if (tAh !== null) add('ahorro', 'Tasa de ahorro', anaN_(tAh) + '%', 'Conservas ' + anaN_(tAh) + '% de lo que ingresa (promedio de ' + serie.length + ' meses completos).', tAh >= 20 ? 'ok' : tAh >= 8 ? 'atencion' : 'alerta', '(ingresos − gastos) / ingresos');
+  const consist = serie.filter(function (x) { return x.ahorro > 0; }).length;
+  out.mesesConAhorro = consist;
+  add('constancia', 'Constancia de ahorro', consist + ' de ' + serie.length + ' meses', 'Meses en los que gastaste menos de lo que ingresó.', consist / serie.length >= 0.8 ? 'ok' : consist / serie.length >= 0.5 ? 'atencion' : 'alerta', 'meses con ahorro > 0');
+  const mI = anaMedia_(I), cvI = mI > 0 ? anaDesv_(I) / mI : null;
+  out.cvIngresos = cvI;
+  if (cvI !== null) add('estabilidad', 'Estabilidad de ingresos', anaN_(cvI * 100) + '% de variación', cvI <= 0.2 ? 'Tus ingresos son bastante parejos mes a mes.' : cvI <= 0.5 ? 'Tus ingresos varían de forma moderada.' : 'Tus ingresos cambian mucho de un mes a otro.', cvI <= 0.2 ? 'ok' : cvI <= 0.5 ? 'atencion' : 'alerta', 'desviación estándar / promedio de ingresos mensuales');
+
+  const desde6 = anaInicioMes_(hoy, -serie.length);
+  const l6 = base.lista.filter(function (m) { return m.f >= desde6 && m.f < anaInicioMes_(hoy); });
+  const ing6 = l6.filter(function (m) { return m.ing; }), gas6 = l6.filter(function (m) { return !m.ing; });
+  const fuentes = {}; ing6.forEach(function (m) { fuentes[m.cat] = (fuentes[m.cat] || 0) + m.pen; });
+  const fk = Object.keys(fuentes).sort(function (a, b) { return fuentes[b] - fuentes[a]; });
+  const iTot = anaSuma_(ing6);
+  if (fk.length && iTot > 0) {
+    const p = fuentes[fk[0]] / iTot * 100; out.fuentePrincipal = { nombre: fk[0], pct: p };
+    add('dependencia', 'Dependencia de tu fuente principal', anaN_(p) + '%', '"' + fk[0] + '" aporta ' + anaN_(p) + '% de tus ingresos' + (fk.length > 1 ? ' (tienes ' + fk.length + ' fuentes).' : ' y es tu única fuente.'), p <= 60 ? 'ok' : p <= 85 ? 'atencion' : 'alerta', 'ingreso de la mayor fuente / ingresos totales');
+  }
+  const pasivo = iTot > 0 ? anaSuma_(ing6.filter(function (m) { return m.tipo === 'Ingreso Pasivo'; })) / iTot * 100 : 0;
+  add('pasivo', 'Ingresos pasivos', anaN_(pasivo) + '%', pasivo >= 20 ? 'Una parte relevante de tus ingresos no depende de tu tiempo.' : 'Casi todo tu ingreso depende de que trabajes activamente.', pasivo >= 20 ? 'ok' : 'info', 'ingresos marcados como pasivos / ingresos totales');
+
+  const gTot = anaSuma_(gas6);
+  const fijos = recurrentes_().reduce(function (s, x) { return s + x.promedioMensual; }, 0);
+  const gMes = gTot / Math.max(serie.length, 1);
+  if (gMes > 0) add('fijos', 'Pagos fijos detectados', anaN_(fijos / gMes * 100) + '% de tu gasto', 'Pagos que se repiten cada mes suman unos ' + anaN_(fijos) + ' al mes (estimación).', fijos / gMes <= 0.5 ? 'ok' : 'atencion', 'recurrentes detectados / gasto mensual');
+  const peq = gas6.filter(function (m) { return m.pen < 20; });
+  if (gTot > 0) add('pequenos', 'Gastos pequeños (< S/ 20)', anaN_(anaSuma_(peq) / gTot * 100) + '%', peq.length + ' compras chicas suman ' + anaN_(anaSuma_(peq)) + ' en ' + serie.length + ' meses.', anaSuma_(peq) / gTot <= 0.1 ? 'ok' : 'atencion', 'gastos < S/ 20 / gasto total');
+  const tj = gas6.filter(function (m) { return m.medio === 'Tarjeta de Credito'; });
+  if (gTot > 0) add('tarjeta', 'Uso de tarjeta de crédito', anaN_(anaSuma_(tj) / gTot * 100) + '% de tus gastos', 'Parte de tu gasto pasa por tarjeta.', 'info', 'gastos con tarjeta / gasto total');
+  // ¿gasta más justo después de cobrar? (5 días tras un ingreso vs resto)
+  const cobros = ing6.filter(function (m) { return m.pen >= 0.3 * (mI || 1); }).map(function (m) { return m.f.getTime(); });
+  if (cobros.length >= 2 && gas6.length >= 20) {
+    // se excluyen los pagos fijos (alquiler, suscripciones): caen justo después de cobrar por calendario, no por impulso
+    const fijosNom = {}; recurrentes_().forEach(function (x) { fijosNom[anaNorm_(x.pago)] = 1; });
+    const gasV = gas6.filter(function (m) { return !fijosNom[anaNorm_(m.desc) || anaNorm_(m.cat + ' ' + m.sub)]; });
+    const gVar = anaSuma_(gasV);
+    let postG = 0;
+    const ventana = {};
+    cobros.forEach(function (t) { for (let k = 0; k < 5; k++) ventana[anaIso_(new Date(t + k * 86400000))] = 1; });
+    const diasTot = Math.max(1, Math.round((anaInicioMes_(hoy) - desde6) / 86400000));
+    const dPost = Math.min(Object.keys(ventana).length, diasTot - 1);
+    gasV.forEach(function (m) { if (ventana[anaIso_(m.f)]) postG += m.pen; });
+    const ratio = (postG / Math.max(dPost, 1)) / (((gVar - postG) / Math.max(diasTot - dPost, 1)) || 1);
+    if (isFinite(ratio)) { out.ratioPostCobro = ratio; add('postcobro', 'Gasto tras cobrar', 'x' + anaN_(ratio) + ' vs. un día normal', ratio >= 1.5 ? 'Gastas bastante más en los 5 días posteriores a un ingreso grande.' : 'No se nota un salto de gasto después de cobrar.', ratio >= 1.5 ? 'atencion' : 'ok', 'gasto diario en los 5 días tras un ingreso / gasto diario del resto'); }
+  }
+  const dias = {}; gas6.forEach(function (m) { const k = DIAS_ES_[m.f.getDay()]; dias[k] = (dias[k] || 0) + m.pen; });
+  const dk = Object.keys(dias).sort(function (a, b) { return dias[b] - dias[a]; });
+  if (dk.length) { out.diaMayorGasto = dk[0]; add('dia', 'Día de mayor gasto', dk[0], 'El ' + dk[0] + ' concentra ' + anaN_(dias[dk[0]] / gTot * 100) + '% de tu gasto.', 'info', 'gasto por día de la semana'); }
+
+  // liquidez y patrimonio
+  let liquido = 0, inv = 0;
+  obtenerCuentasActivas_().forEach(function (c) { const v = convertirAPEN_(c.saldo, c.moneda, tasa); if (c.tipo === 'Inversion') inv += v; else liquido += v; });
+  const pat = calcularPatrimonioDetalle_();
+  const meses = gMes > 0 ? liquido / gMes : null;
+  out.mesesLiquidez = meses;
+  if (meses !== null) add('liquidez', 'Colchón de liquidez', anaN_(meses) + ' meses', 'Tu efectivo cubre ' + anaN_(meses) + ' meses de gastos al ritmo actual.', meses >= 6 ? 'ok' : meses >= 3 ? 'atencion' : 'alerta', 'efectivo disponible / gasto mensual promedio');
+  const patTotal = (pat && (pat.total !== undefined ? pat.total : pat.neto)) || null;
+  const invTotal = Number((pat && pat.inversiones) || 0) + inv;
+  const activos = liquido + invTotal;
+  out.pctInvertido = activos > 0 ? invTotal / activos * 100 : 0;
+  add('invertido', 'Parte invertida', anaN_(out.pctInvertido) + '%', invTotal > 0 ? 'Tienes ' + anaN_(out.pctInvertido) + '% de tu dinero en inversiones.' : 'Todavía no tienes dinero en inversiones registradas.', out.pctInvertido >= 20 ? 'ok' : 'info', 'inversiones / (efectivo + inversiones)');
+  const deuda = Number((pat && pat.deudas) || 0) + Number((pat && pat.tarjeta) || 0);
+  if (deuda > 0 && iTot > 0) add('deuda', 'Deudas y tarjeta pendientes', anaN_(deuda), 'Equivale a ' + anaN_(deuda / (iTot / serie.length)) + ' meses de ingreso.', deuda / (iTot / serie.length) <= 1 ? 'atencion' : 'alerta', 'deudas + consumos de tarjeta no pagados');
+  out.patrimonio = pat; out.mensual = serie;
+  return out;
+}
+
+/** Arquetipo por reglas explícitas: se muestran los datos que lo disparan */
+function arquetipoPerfil_(o) {
+  if (o.pocos) return { nombre: 'Perfil en construcción', explicacion: 'Aún hay menos de 2 meses completos de movimientos. Sigue registrando y el perfil se afina solo.', reglas: [] };
+  const r = [];
+  const tA = o.tasaAhorro === null || o.tasaAhorro === undefined ? 0 : o.tasaAhorro;
+  const inv = o.pctInvertido || 0, cv = o.cvIngresos === null || o.cvIngresos === undefined ? 0 : o.cvIngresos, cons = o.mesesConAhorro / Math.max(o.meses, 1);
+  let nombre, expl;
+  if (tA < 0) { nombre = 'En déficit'; expl = 'Estás gastando más de lo que ingresa. Es la prioridad número uno.'; r.push('tasa de ahorro ' + anaN_(tA) + '% (negativa)'); }
+  else if (tA >= 20 && inv >= 20) { nombre = 'Constructor de patrimonio'; expl = 'Ahorras con firmeza y ya haces trabajar parte de ese dinero en inversiones.'; r.push('tasa de ahorro ' + anaN_(tA) + '% ≥ 20%', 'invertido ' + anaN_(inv) + '% ≥ 20%'); }
+  else if (tA >= 20) { nombre = 'Ahorrador conservador'; expl = 'Ahorras bien, pero casi todo se queda parado como efectivo: el siguiente paso es decidir qué parte invertir.'; r.push('tasa de ahorro ' + anaN_(tA) + '% ≥ 20%', 'invertido ' + anaN_(inv) + '% < 20%'); }
+  else if (cv > 0.5) { nombre = 'Ingresos irregulares'; expl = 'Tu mayor reto no es cuánto gastas sino lo cambiantes que son tus ingresos; necesitas un colchón mayor y un presupuesto basado en tu mes mínimo.'; r.push('variación de ingresos ' + anaN_(cv * 100) + '% > 50%'); }
+  else if (tA >= 8) { nombre = 'Equilibrado'; expl = 'Cubres tus gastos y ahorras algo, aunque con margen para mejorar.'; r.push('tasa de ahorro ' + anaN_(tA) + '% entre 8% y 20%'); }
+  else { nombre = 'Gasto al límite'; expl = 'Casi todo lo que ingresa se va en gastos; cualquier imprevisto te pega fuerte.'; r.push('tasa de ahorro ' + anaN_(tA) + '% < 8%'); }
+  if (cons < 0.5 && tA >= 0) r.push('ahorras solo en ' + o.mesesConAhorro + ' de ' + o.meses + ' meses: el ahorro depende de lo que sobra');
+  return { nombre: nombre, explicacion: expl, reglas: r, aviso: 'Etiqueta orientativa basada en reglas simples, no un diagnóstico ni un puntaje.' };
+}
+
+function perfilNarrativa_(o, arq, hallazgos) {
+  const system = SYSTEM_ANALISTA_ + ' Con los indicadores y hallazgos entregados redacta un perfil breve del comportamiento financiero del usuario. ' +
+    'Responde SOLO con JSON: {"resumen":"2-3 frases","fortalezas":["..."],"debilidades":["..."],"habitos":["patrones observados, sin asumir causas"],"siguiente_paso":"una acción concreta"}. ' +
+    'Máximo 3 elementos por lista, cada uno de una línea con cifras de los datos.';
+  const datos = { arquetipo: arq, indicadores: o.indicadores.map(function (x) { return { titulo: x.titulo, valor: x.valor, nivel: x.nivel, texto: x.texto }; }), mensual: o.mensual, hallazgos: hallazgos };
+  return extraerJSON_(iaTexto_(system, JSON.stringify(datos), 900));
+}
+
+function api_perfil(a) {
+  ANA_ = null;
+  const o = indicadoresPerfil_();
+  const arq = arquetipoPerfil_(o);
+  let hallazgos = [];
+  try {
+    const rec = recurrentes_().filter(function (x) { return x.subioPct > 0; }).slice(0, 3).map(function (x) { return { tipo: 'subió de precio', texto: x.pago + ' subió ' + x.subioPct + '% (ahora ' + x.ultimoPago + ')' }; });
+    const an = anomalias_(anaRango_({ periodo: 'ultimos_30' })).slice(0, 4).map(function (x) { return { tipo: x.tipo, texto: x.tipo + ': ' + (x.descripcion || x.categoria) + (x.monto ? ' (' + x.monto + ')' : (x.subePct ? ' (+' + x.subePct + '%)' : '')) }; });
+    hallazgos = rec.concat(an);
+  } catch (e) { /* opcional */ }
+  const sal = { arquetipo: arq, indicadores: o.indicadores, mesesAnalizados: o.meses, hallazgos: hallazgos, narrativa: null, iaDisponible: !!iaProveedor_(), generado: '', error: '' };
+  if (!sal.iaDisponible || o.pocos) { ANA_ = null; return sal; }
+  const cache = CacheService.getScriptCache();
+  const g = cache.get('ia_perfil');
+  if (g && !(a && a.forzar)) { try { const x = JSON.parse(g); sal.narrativa = x.n; sal.generado = x.g; ANA_ = null; return sal; } catch (e) { /* recalcular */ } }
+  try {
+    sal.narrativa = perfilNarrativa_(o, arq, hallazgos);
+    sal.generado = fechaHoraISO_(new Date());
+    cache.put('ia_perfil', JSON.stringify({ n: sal.narrativa, g: sal.generado }), 21600);
+  } catch (e) { sal.error = e.message; }
+  ANA_ = null;
+  return sal;
 }
