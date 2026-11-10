@@ -51,6 +51,16 @@ Sin hoja, la pestaña Bolsa no aparece. Alternativa avanzada: publicar tu propio
 y poner su dirección en config.js (PROXY_URL).
 
 ─────────────────────────────────────────
+7. SEGURIDAD
+─────────────────────────────────────────
+- El PIN nunca se guarda tal cual: solo su huella (PBKDF2-SHA256 con sal). Los PIN de versiones anteriores
+  se convierten solos la primera vez que entras.
+- Tras 5 intentos fallidos la app obliga a esperar (30 s, 1 min, 2 min… hasta 1 h). Recargar no reinicia la cuenta.
+- La app se bloquea tras 5 min en segundo plano o 10 min sin uso, y tapa la pantalla al cambiar de app.
+- Las copias de seguridad nunca incluyen PIN ni claves; al restaurar, si un archivo las trae, se ignoran.
+- La página declara una política de seguridad de contenido (CSP): no carga scripts ni imágenes de otros sitios.
+
+─────────────────────────────────────────
 SI LA APP NO ABRE
 ─────────────────────────────────────────
 Aparecerá "La app no pudo iniciar" con el botón "Reparar y volver a abrir": borra solo la copia guardada
