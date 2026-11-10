@@ -50,6 +50,15 @@
     op.set(sha256(ip), 64);
     return sha256(op);
   }
+  /* Para el PIN: PBKDF2-HMAC-SHA256 (una sola salida de 32 bytes) */
+  function pbkdf2(pass, salt, iter) {
+    const P = utf8(pass), S = new Uint8Array(salt.length + 4);
+    S.set(salt); S[salt.length + 3] = 1;
+    let u = hmac(P, S); const t = u.slice();
+    for (let i = 1; i < iter; i++) { u = hmac(P, u); for (let j = 0; j < 32; j++) t[j] ^= u[j]; }
+    return t;
+  }
+  G.__cripto = { pbkdf2: pbkdf2 };
   function aBytes(x) { return typeof x === 'string' ? utf8(x) : Uint8Array.from(x, function (v) { return v & 255; }); }
   const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   function b64(bytes, web) {

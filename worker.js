@@ -60,6 +60,53 @@ importScripts('config.js' + VQ, 'shim.js' + VQ, 'gs-bundle.js' + VQ, 'prelude.js
 
 let listo = abrirDB().then(function () { return idb('readonly', function (s) { return s.get(KEY); }); }).then(function (txt) { if (txt) restaurar(txt); });
 
+/* ---- PIN: nunca se guarda tal cual, solo su huella (PBKDF2 + sal) ---- */
+const PIN_ITER = 10000;
+function hex(b) { return Array.from(b, function (x) { return x.toString(16).padStart(2, '0'); }).join(''); }
+function deHex(h) { const o = new Uint8Array(h.length / 2); for (let i = 0; i < o.length; i++) o[i] = parseInt(h.substr(i * 2, 2), 16); return o; }
+function igualSeguro(a, b) { a = String(a); b = String(b); let d = a.length ^ b.length; for (let i = 0; i < Math.max(a.length, b.length); i++) d |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0); return d === 0; }
+function huellaPin(pin) {
+  const sal = new Uint8Array(16); crypto.getRandomValues(sal);
+  return 'pbkdf2$' + PIN_ITER + '$' + hex(sal) + '$' + hex(self.__cripto.pbkdf2(pin, sal, PIN_ITER));
+}
+function pinCorrecto(pin, guardado) {
+  pin = String(pin || '').trim(); guardado = String(guardado || '');
+  const p = guardado.split('$');
+  if (p[0] === 'pbkdf2' && p.length === 4) return igualSeguro(hex(self.__cripto.pbkdf2(pin, deHex(p[2]), Number(p[1]) || PIN_ITER)), p[3]);
+  return !!guardado && igualSeguro(pin, guardado); // PIN antiguo en texto: se convierte al entrar
+}
+/* Intentos fallidos guardados en el teléfono (recargar la app no los reinicia). Desde el 5.º, espera creciente: 30 s, 1 min, 2 min… hasta 1 h */
+function esperaRestante() { return Math.max(0, Number(self.PropertiesService.getScriptProperties().getProperty('PIN_BLOQUEO_HASTA') || 0) - Date.now()); }
+function textoEspera(ms) { const s = Math.ceil(ms / 1000); return s < 60 ? s + ' segundos' : Math.ceil(s / 60) + ' minuto' + (Math.ceil(s / 60) === 1 ? '' : 's'); }
+function revisarPin(pin) {
+  const P = self.PropertiesService.getScriptProperties();
+  const guardado = P.getProperty('DASHBOARD_PIN');
+  if (!guardado) throw new Error('Aún no has creado un PIN.');
+  const espera = esperaRestante();
+  if (espera > 0) throw new Error('Demasiados intentos. Espera ' + textoEspera(espera) + '.');
+  if (!pinCorrecto(pin, guardado)) {
+    const f = Number(P.getProperty('PIN_FALLOS') || 0) + 1;
+    P.setProperty('PIN_FALLOS', String(f));
+    if (f >= 5) {
+      const ms = Math.min(30000 * Math.pow(2, f - 5), 3600000);
+      P.setProperty('PIN_BLOQUEO_HASTA', String(Date.now() + ms));
+      throw new Error('PIN incorrecto. Por seguridad espera ' + textoEspera(ms) + ' antes de intentar de nuevo.');
+    }
+    throw new Error('PIN incorrecto.' + (f >= 3 ? (5 - f === 1 ? ' Te queda 1 intento' : ' Te quedan ' + (5 - f) + ' intentos') + ' antes de una espera.' : ''));
+  }
+  if (P.getProperty('PIN_FALLOS')) P.deleteProperty('PIN_FALLOS');
+  if (P.getProperty('PIN_BLOQUEO_HASTA')) P.deleteProperty('PIN_BLOQUEO_HASTA');
+  if (String(guardado).indexOf('pbkdf2$') !== 0) P.setProperty('DASHBOARD_PIN', huellaPin(String(pin).trim()));
+}
+/* Entrada local: reemplaza la comparación en texto del código compartido con la hoja */
+self.login_ = function (args) { revisarPin(args.pin); return { token: self.crearToken_() }; };
+self.verificarToken_ = function (token) {
+  const p = String(token || '').split('.');
+  if (p.length !== 2 || !self.PropertiesService.getScriptProperties().getProperty('DASHBOARD_PIN')) return false;
+  if (!(Number(p[0]) > Date.now())) return false;
+  return igualSeguro(self.firmar_(p[0]), p[1]);
+};
+
 function sinSecretos(props) {
   const o = {};
   Object.keys(props).forEach(function (k) { if (!/PIN|SECRET|KEY|TOKEN/i.test(k) && k !== 'LOCAL_TAREAS_DIA') o[k] = props[k]; });
@@ -70,17 +117,18 @@ function pinValido(p) { p = String(p || '').trim(); if (!/^\d{4,8}$/.test(p)) th
 
 const ops = {
   version: function () { return self.APP_V || ''; },
-  estado: function () { return { tienePin: !!self.PropertiesService.getScriptProperties().getProperty('DASHBOARD_PIN') }; },
+  estado: function () { return { tienePin: !!self.PropertiesService.getScriptProperties().getProperty('DASHBOARD_PIN'), espera: esperaRestante() }; },
   crearPin: function (a) {
     const P = self.PropertiesService.getScriptProperties();
     if (P.getProperty('DASHBOARD_PIN')) throw new Error('Ya hay un PIN creado.');
-    P.setProperty('DASHBOARD_PIN', pinValido(a.pin)); P.setProperty('SESSION_SECRET', aleatorio());
+    P.setProperty('DASHBOARD_PIN', huellaPin(pinValido(a.pin))); P.setProperty('SESSION_SECRET', aleatorio());
     return true;
   },
   cambiarPin: function (a) {
     const P = self.PropertiesService.getScriptProperties();
-    if (String(a.actual || '').trim() !== P.getProperty('DASHBOARD_PIN')) throw new Error('El PIN actual no es correcto.');
-    P.setProperty('DASHBOARD_PIN', pinValido(a.nuevo)); P.setProperty('SESSION_SECRET', aleatorio());
+    const nuevo = pinValido(a.nuevo);
+    try { revisarPin(a.actual); } catch (e) { throw new Error(/espera/i.test(e.message) ? e.message : 'El PIN actual no es correcto.'); }
+    P.setProperty('DASHBOARD_PIN', huellaPin(nuevo)); P.setProperty('SESSION_SECRET', aleatorio());
     return true;
   },
   exportar: function () {
@@ -91,11 +139,14 @@ const ops = {
     const P = self.PropertiesService.getScriptProperties();
     const pin = P.getProperty('DASHBOARD_PIN'), sec = P.getProperty('SESSION_SECRET'), gem = P.getProperty('GEMINI_API_KEY');
     let o; try { o = JSON.parse(a.json); } catch (e) { throw new Error('El archivo no es una copia válida.'); }
-    if (!o || o.v !== 1 || !Array.isArray(o.sheets)) throw new Error('El archivo no es una copia válida.');
+    const valida = o && o.v === 1 && Array.isArray(o.sheets) && o.sheets.every(function (h) { return h && typeof h.name === 'string' && h.name.length < 100 && Array.isArray(h.d) && h.d.every(Array.isArray); });
+    if (!valida) throw new Error('El archivo no es una copia válida.');
     if (!pin) a.pin = pinValido(a.pin);
-    restaurar(a.json);
+    // Una copia nunca trae PIN, claves ni bloqueos: si alguien los mete a mano en el archivo, se ignoran
+    o.props = sinSecretos(o.props && typeof o.props === 'object' ? o.props : {});
+    restaurar(JSON.stringify(o));
     const Q = self.PropertiesService.getScriptProperties();
-    Q.setProperty('DASHBOARD_PIN', pin || a.pin); Q.setProperty('SESSION_SECRET', sec || aleatorio()); if (gem) Q.setProperty('GEMINI_API_KEY', gem);
+    Q.setProperty('DASHBOARD_PIN', pin || huellaPin(a.pin)); Q.setProperty('SESSION_SECRET', sec || aleatorio()); if (gem) Q.setProperty('GEMINI_API_KEY', gem);
     return true;
   },
   borrarTodo: function () { const st = self.__store; st.sheets = {}; st.props = {}; st.nextId = 1; return true; },
@@ -111,7 +162,7 @@ self.onmessage = function (ev) {
   cola = cola.then(function () { return listo; }).then(function () {
     let res, err;
     pendiente = false;
-    try { res = ops[m.op](m.a || {}); } catch (e) { err = e.message || String(e); }
+    try { if (!Object.prototype.hasOwnProperty.call(ops, m.op)) throw new Error('Operación no válida.'); res = ops[m.op](m.a || {}); } catch (e) { err = e.message || String(e); }
     const g = pendiente || m.op === 'borrarTodo' || m.op === 'importar' ? guardar() : Promise.resolve();
     return g.then(function () { self.postMessage(err ? { id: m.id, err: err } : { id: m.id, res: res }); });
   });
