@@ -1,3 +1,4 @@
+self.APP_V='20261110-1205';
 /* ==== 00_Config.gs ==== */
 /**
  * ============================================================
@@ -336,6 +337,7 @@ function setAjuste_(clave, valor) {
   }
   hoja.appendRow([clave, valor]);
 }
+
 
 /* ==== 01_Setup.gs ==== */
 /**
@@ -715,6 +717,7 @@ function diagnosticarSistema() {
   avisar_(problemas.length ? 'Revisión:\n- ' + problemas.join('\n- ') : '✅ Todo en orden (' + auditoria + ' cuentas revisadas).');
 }
 
+
 /* ==== 02_Movimientos.gs ==== */
 /**
  * ============================================================
@@ -1043,6 +1046,7 @@ function ajustarSaldoManual(cuentaId, saldoReal) {
   });
 }
 
+
 /* ==== 03_CambioDivisa.gs ==== */
 /**
  * ============================================================
@@ -1120,6 +1124,7 @@ function tasaPromedioPonderada(monedaOrigen, monedaDestino) {
   }
   return totalOrigen === 0 ? null : totalDestino / totalOrigen;
 }
+
 
 /* ==== 04_PrestamosDeudas.gs ==== */
 /**
@@ -1363,6 +1368,7 @@ function buscarFilaPorId_(nombreHoja, id) {
   return null;
 }
 
+
 /* ==== 05_Recurrentes.gs ==== */
 /**
  * ============================================================
@@ -1461,6 +1467,7 @@ function yaSeEjecutoEsteMes_(ultimaEjecucion, fecha) {
   if (!u) return false;
   return u.getMonth() === fecha.getMonth() && u.getFullYear() === fecha.getFullYear();
 }
+
 
 /* ==== 06_MetasPresupuestos.gs ==== */
 /**
@@ -1592,6 +1599,7 @@ function verificarPresupuestos() {
   });
 }
 
+
 /* ==== 08_TipoCambio.gs ==== */
 /**
  * ============================================================
@@ -1676,6 +1684,7 @@ function calcularPatrimonioDetalle_() {
 function calcularPatrimonioNetoConsolidado() {
   return calcularPatrimonioDetalle_().total;
 }
+
 
 /* ==== 09_Telegram.gs ==== */
 /**
@@ -2035,6 +2044,7 @@ function repararTelegramMenu() {
   catch (e) { ui.alert('❌ ' + e.message); }
 }
 
+
 /* ==== 10_Notificaciones.gs ==== */
 /**
  * ============================================================
@@ -2109,6 +2119,7 @@ function notificacionAnual() {
     generarYEnviarReporteAnual();
   });
 }
+
 
 /* ==== 11_Reportes.gs ==== */
 /**
@@ -2411,6 +2422,7 @@ function enviarHojaComoPDF_(hoja, tituloArchivo) {
   registrarLog_('Reporte', tituloArchivo + (enviado ? ' generado y enviado por Telegram' : ' generado pero NO se pudo enviar'));
 }
 
+
 /* ==== 12_Triggers.gs ==== */
 /**
  * ============================================================
@@ -2454,6 +2466,7 @@ function eliminarTriggersExistentes_() {
   });
 }
 
+
 /* ==== 13_WebApp.gs ==== */
 /**
  * ============================================================
@@ -2469,7 +2482,10 @@ function eliminarTriggersExistentes_() {
 
 function doGet(e) {
   if (e && e.parameter && e.parameter.tg) return ContentService.createTextOutput('ok'); // ping del webhook
-  return HtmlService.createTemplateFromFile('Dashboard')
+  let plantilla;
+  try { plantilla = HtmlService.createTemplateFromFile('Dashboard'); }
+  catch (x) { return ContentService.createTextOutput('✅ Tu hoja de finanzas está lista. Copia esta misma dirección (termina en /exec) y pégala en la app.'); }
+  return plantilla
     .evaluate()
     .setTitle('Finanzas')
     .addMetaTag('viewport', 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover')
@@ -2526,8 +2542,8 @@ var API_ESCRITURA_ = ['registrar', 'editarMovimiento', 'eliminarMovimiento', 'tr
   'eliminarCuenta', 'ajustarSaldo', 'editarProgramado', 'cancelarProgramado', 'eliminarProgramado', 'realizarProgramado', 'guardarMeta', 'eliminarMeta',
   'guardarPresupuesto', 'eliminarPresupuesto', 'guardarRecurrente', 'eliminarRecurrente', 'guardarRegla', 'eliminarRegla', 'guardarAjustes',
   'operacionInversion', 'eliminarOperacion', 'crearPrestamo', 'guardarProyecto', 'eliminarProyecto', 'asignarProyecto', 'guardarFondo', 'respaldoAhora', 'enviarExportacion', 'compraParaOtro', 'cobrarPersona', 'editarPrestamo', 'cerrarPrestamo', 'renombrarPersona', 'cobrarInteres', 'devolverCapital', 'crearDeuda', 'pagarCuota',
-  'configurarTarjeta','guardarTarjeta','eliminarTarjeta','repararTelegram', 'guardarObjetivos', 'guardarCategoria', 'guardarNaturaleza', 'guardarMetaAhorro', 'eliminarMetaAhorro', 'moverMetaAhorro', 'eliminarCategoria', 'guardarSubcategoria', 'eliminarSubcategoria', 'guardarWatchlist', 'registrarDividido', 'registrarDivision', 'eliminarDivision'];
-var API_ADMIN_ = ['enviarReporte', 'estadoSistema'];
+  'configurarTarjeta','guardarTarjeta','eliminarTarjeta','repararTelegram', 'guardarObjetivos', 'guardarCategoria', 'guardarNaturaleza', 'guardarMetaAhorro', 'eliminarMetaAhorro', 'moverMetaAhorro', 'eliminarCategoria', 'guardarSubcategoria', 'eliminarSubcategoria', 'guardarWatchlist', 'registrarDividido', 'registrarDivision', 'eliminarDivision', 'importarDesdeLocal'];
+var API_ADMIN_ = ['enviarReporte', 'estadoSistema', 'importarDesdeLocal', 'guardarClaveIA', 'guardarTelegram'];
 
 /**
  * Único punto de entrada desde la página: apiLlamar(nombre, args, token). Devuelve siempre un objeto simple:
@@ -2917,6 +2933,7 @@ function api_enviarReporte(args) {
   return true;
 }
 
+
 /* ==== 14_Migracion.gs ==== */
 /**
  * ============================================================
@@ -3056,6 +3073,7 @@ function ajustarSaldoDesdeMenu() {
   ui.alert(dif === 0 ? 'El saldo ya coincidía.' : '✅ Ajustado (diferencia ' + dif + '). Quedó un movimiento tipo Ajuste.');
 }
 
+
 /* ==== 15_Cuentas.gs ==== */
 /**
  * ============================================================
@@ -3190,6 +3208,7 @@ function cuentaPorDefecto_(moneda, medio) {
   if (primera === null) throw new Error('No tienes una cuenta ' + (medio === 'Efectivo' ? 'de efectivo' : 'bancaria') + ' activa en ' + moneda + '. Crea una en la pestaña Cuentas.');
   return primera;
 }
+
 
 /* ==== 16_Programados.gs ==== */
 /**
@@ -3511,6 +3530,7 @@ function api_puntualidad() {
   };
 }
 
+
 /* ==== 17_EdicionMovimientos.gs ==== */
 /**
  * ============================================================
@@ -3765,6 +3785,7 @@ function eliminarMovimiento(id) {
     registrarLog_('EliminarMovimiento', '#' + id);
   });
 }
+
 
 /* ==== 18_Inversiones.gs ==== */
 /**
@@ -4126,6 +4147,7 @@ function dividendosSugeridos_() {
   });
   return sugeridos.sort(function (a, b) { return a.fechaEx < b.fechaEx ? 1 : -1; });
 }
+
 
 /* ==== 19_IA.gs ==== */
 /**
@@ -4737,6 +4759,7 @@ function interpretarLocal_(texto) {
   return { acciones: [{ accion: 'registrar', tipo: gasto ? 'gasto' : 'ingreso', monto: numero_(nums[0]), moneda: moneda, descripcion: desc, medio: medio, fecha: null, clase: ingreso && /(alquiler|inter[eé]s|dividendo)/.test(t) ? 'pasivo' : null, categoria: null }], no_entendi: false, local: true };
 }
 
+
 /* ==== 20_Configuracion.gs ==== */
 /**
  * ============================================================
@@ -4934,6 +4957,7 @@ function api_cobrarInteres(a) { return registrarCobroInteresPrestamo(a.id, a.mon
 function api_devolverCapital(a) { return registrarDevolucionCapitalPrestamo(a.id, a.monto, a.cuentaId, a.fecha); }
 function api_crearDeuda(a) { return registrarDeudaRecibida(a); }
 function api_pagarCuota(a) { registrarPagoCuotaDeuda(a.id, a.cuentaId, a.fecha); return true; }
+
 
 
 /* ==== 21_Mejoras.gs ==== */
@@ -5576,6 +5600,7 @@ function revisarAccionesAlertas() {
   });
 }
 
+
 /* ==== 22_Tarjetas.gs ==== */
 /**
  * ============================================================
@@ -5908,6 +5933,7 @@ function api_eliminarTarjeta(a) {
   });
 }
 
+
 /* ==== 24_Personas.gs ==== */
 /**
  * ============================================================
@@ -6070,6 +6096,7 @@ function api_prestamoPagos(a) {
   return leerMovimientos_().filter(function (m) { return re.test(m.notas || ''); })
     .sort(function (x, y) { return y.fecha - x.fecha; }).map(function (m) { return movimientoParaApp_(m, nombres); });
 }
+
 
 /* ==== 25_Proyectos.gs ==== */
 /**
@@ -6297,6 +6324,7 @@ function api_guardarFondo(a) {
   return true;
 }
 
+
 /* ==== 26_Respaldo.gs ==== */
 /**
  * ============================================================
@@ -6371,6 +6399,7 @@ function resumenSemanalTexto_() {
   if (f.gastoMensual > 0) t += '🛟 Fondo de emergencia: ' + f.meses + ' de ' + f.objetivoMeses + ' meses cubiertos.';
   return t;
 }
+
 
 /* ==== 27_Plan.gs ==== */
 /**
@@ -6554,6 +6583,7 @@ function api_moverMetaAhorro(a) {
     throw new Error('Meta no encontrada.');
   });
 }
+
 /* ==== 30_DividirGastos.gs ==== */
 /**
  * ============================================================
@@ -6758,6 +6788,7 @@ function detalleDivision_(m) {
   if (!dv) return null;
   return { total: numero_(dv[2]), yo: m.monto, moneda: m.moneda, personas: deudasDeDivision_(m.id) };
 }
+
 /* ==== 31_AnalistaIA.gs ==== */
 /**
  * ============================================================
@@ -7321,3 +7352,4 @@ function api_perfil(a) {
   ANA_ = null;
   return sal;
 }
+

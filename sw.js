@@ -1,16 +1,14 @@
-const V='finanzas-v6';
-const ARCH=['config.js','jspdf.umd.min.js','jspdf.plugin.autotable.min.js','./','index.html','worker.js','shim.js','gs-bundle.js','prelude.js','chart.umd.min.js','lucide.min.js','manifest.webmanifest','icon-192.png','icon-512.png'];
-self.addEventListener('install',e=>{e.waitUntil(caches.open(V).then(c=>c.addAll(ARCH)).then(()=>self.skipWaiting()))});
+const V='finanzas-v7';
+const ARCH=['config.js','jspdf.umd.min.js','jspdf.plugin.autotable.min.js','./','index.html','worker.js','shim.js','gs-bundle.js','prelude.js','chart.umd.min.js','lucide.min.js','manifest.webmanifest','icon-192.png','icon-512.png','codigo-hoja.gs'];
+self.addEventListener('install',e=>{e.waitUntil(caches.open(V).then(c=>Promise.all(ARCH.map(u=>fetch(new Request(u,{cache:'reload'})).then(r=>{if(!r.ok)throw new Error(u);return c.put(u,r)})))).then(()=>self.skipWaiting()))});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(x=>x!==V).map(x=>caches.delete(x)))).then(()=>self.clients.claim()))});
+/* Con internet siempre se usa la versión más nueva (así index, motor y código nunca quedan de versiones distintas); sin internet, la guardada. */
 self.addEventListener('fetch',e=>{
   const r=e.request;
   if(r.method!=='GET'||new URL(r.url).origin!==location.origin)return;
-  const u=new URL(r.url);
-  if(/(\/|index\.html|config\.js)$/.test(u.pathname)){
-    e.respondWith(caches.open(V).then(c=>fetch(r).then(x=>{if(x&&x.ok)c.put(r,x.clone());return x}).catch(()=>c.match(r,{ignoreSearch:true}))));return
-  }
-  e.respondWith(caches.open(V).then(c=>c.match(r,{ignoreSearch:true}).then(hit=>{
-    const red=fetch(r).then(x=>{if(x&&x.ok)c.put(r,x.clone());return x}).catch(()=>hit);
-    return hit||red;
-  })));
+  e.respondWith(caches.open(V).then(c=>{
+    const red=fetch(r,{cache:'no-cache'}).then(x=>{if(x&&x.ok)c.put(r,x.clone());return x});
+    const limite=new Promise((_,no)=>setTimeout(()=>no(new Error('lento')),5000));
+    return Promise.race([red,limite]).catch(()=>c.match(r,{ignoreSearch:true}).then(hit=>hit||red))
+  }))
 });

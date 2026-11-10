@@ -1,85 +1,57 @@
-FINANZAS — app para compartir
-=============================
+FINANZAS — app personal de finanzas
+====================================
 
-Esta carpeta ES la app. Se sube a internet una vez y se comparte el enlace. Los pasos A, B y C son para quien publica
-(tú); mamá y tu hermano solo abren el enlace.
-
-─────────────────────────────────────────
-A. PUBLICAR LA APP (obligatorio)
-─────────────────────────────────────────
-Netlify (lo más fácil, 2 minutos, gratis)
-1. Entra a  app.netlify.com/drop  y arrastra esta carpeta completa (o el ZIP).
-2. Te da un enlace tipo  https://nombre-raro.netlify.app  (puedes cambiar el nombre en "Site configuration > Change site name").
-
-GitHub Pages (alternativa gratis)
-1. En github.com crea un repositorio público "finanzas". "uploading an existing file": arrastra TODO el contenido de esta carpeta.
-2. Settings > Pages > Source: "Deploy from a branch" > main / (root) > Save. El enlace será https://TU-USUARIO.github.io/finanzas/
-
-Con eso la app ya funciona: datos en el celular, PIN, copias en archivo, reportes PDF y calendario.
+Esta carpeta ES la app. Se publica una vez (por ejemplo en GitHub Pages) y se comparte el enlace.
+No depende de ningún servidor ni cuenta del que la publica: cada persona usa su propio teléfono,
+su propia hoja de Google (opcional) y su propia clave de IA (opcional).
 
 ─────────────────────────────────────────
-B. ENTRAR CON GOOGLE (opcional) — copia automática en Drive y hoja de cálculo
+1. PUBLICAR (solo quien la comparte)
 ─────────────────────────────────────────
-Solo se hace una vez y es gratis. Necesitas el enlace de tu app del paso A.
-1. Entra a console.cloud.google.com con tu cuenta de Google y crea un proyecto nuevo (nombre: Finanzas).
-2. Menú "APIs y servicios" > "Biblioteca": busca y activa  Google Drive API  y  Google Sheets API.
-3. "APIs y servicios" > "Pantalla de consentimiento de OAuth": tipo "Externo"; pon nombre "Finanzas" y tu correo. En "Permisos"
-   agrega estos tres (todos son de los no sensibles):
-      .../auth/drive.appdata
-      .../auth/drive.file
-      .../auth/userinfo.email
-4. En esa misma pantalla, toca "Publicar la app" (estado "En producción"). Si la dejas en "Prueba", la sesión se vence cada 7 días.
-5. "Credenciales" > "Crear credenciales" > "ID de cliente de OAuth" > tipo "Aplicación web".
-   - "Orígenes autorizados de JavaScript": el enlace de tu app SIN la ruta final, por ejemplo
-         https://nombre-raro.netlify.app        o        https://TU-USUARIO.github.io
-   - "URI de redireccionamiento autorizados": el enlace COMPLETO de tu app, con la barra final, por ejemplo
-         https://nombre-raro.netlify.app/       o        https://TU-USUARIO.github.io/finanzas/
-6. Copia el ID de cliente (termina en .apps.googleusercontent.com) y pégalo en config.js (GOOGLE_CLIENT_ID).
-   Anota también la "Clave secreta del cliente": se usa en el paso C (NO la pegues en config.js).
-7. Vuelve a subir los archivos al mismo sitio.
+GitHub Pages: sube TODO el contenido de esta carpeta a un repositorio público,
+Settings > Pages > Deploy from a branch > main / (root). El enlace queda como https://USUARIO.github.io/REPO/
+
+Al actualizar, sube SIEMPRE juntos index.html, gs-bundle.js, worker.js, shim.js, prelude.js, sw.js y codigo-hoja.gs.
+Si alguna pieza queda de otra versión, la app lo detecta, se repara sola una vez y, si sigue mal, dice qué falta.
 
 ─────────────────────────────────────────
-C. PUENTE GRATUITO (Cloudflare): sesión de Google permanente + bolsa
+2. USAR (cada persona)
 ─────────────────────────────────────────
-Sin este paso, Google te pide volver a conectar cada hora y a veces falla en el celular. Con él, entras una vez y queda
-conectado en todos tus dispositivos. También habilita los precios de la bolsa.
-1. Crea cuenta en dash.cloudflare.com > "Workers & Pages" > "Create" > "Create Worker" > nombre "finanzas" > Deploy.
-2. "Edit code": borra lo que hay, pega TODO el contenido del archivo  worker-cloudflare.js  y toca Deploy.
-3. En el Worker: "Settings" > "Variables and Secrets" > agrega (tipo Text, y Secret para la clave):
-      GOOGLE_CLIENT_ID       (Text)    tu ID de cliente de Google
-      GOOGLE_CLIENT_SECRET   (Secret)  la clave secreta del paso B.6
-      ALLOWED_ORIGIN         (Text)    la dirección de tu app sin barra final, ej: https://TU-USUARIO.github.io
-   y toca Deploy otra vez.
-4. Copia la dirección del Worker (tipo https://finanzas.TU-USUARIO.workers.dev) y pégala en config.js, en PROXY_URL.
-5. Vuelve a subir los archivos. Aparece la pestaña "Bolsa" y Google ya no se desconecta.
-Si ya habías conectado Google antes de este paso: en la app, Más > Cuenta de Google > Desconectar, y vuelve a conectar.
-Si Google no te muestra de nuevo la pantalla de permisos, quita el acceso en myaccount.google.com/permissions y conecta otra vez.
-
-SINCRONIZACIÓN ENTRE DISPOSITIVOS
-- Cada cambio se guarda en tu Drive a los pocos segundos. Al abrir la app o volver a ella, trae lo último que subió otro dispositivo.
-- Si cambias algo sin internet y otro dispositivo también cambió algo, la app te pregunta con cuál quedarte (no mezcla los dos).
-- Lo más seguro: usa un dispositivo a la vez y espera a ver el cambio guardado antes de abrir otro.
+Abre el enlace en el celular, crea tu PIN y listo: los datos quedan en tu teléfono.
+Instálala como app: en Chrome, menú ⋮ > "Agregar a la pantalla principal".
+Guarda copias de seguridad desde Más > Copia de seguridad.
 
 ─────────────────────────────────────────
-PARA QUIEN LA USA (mamá, hermano)
+3. TU PROPIA HOJA DE GOOGLE (opcional)
 ─────────────────────────────────────────
-1. Abrir el enlace en el celular (Safari en iPhone, Chrome en Android).
-2. iPhone: Compartir > "Agregar a pantalla de inicio".   Android: menú ⋮ > "Instalar app".
-3. Abrir desde el ícono y crear su PIN. Crear sus cuentas en "Cuentas".
-4. En Más > "Cuenta de Google" pueden entrar con Google: sus datos se copian solos a su Drive.
-   Sin Google: Más > Copia de seguridad > "Guardar copia ahora" cada tanto.
-5. Más > Reportes en PDF, y Más > Avisos para agregar sus pagos al calendario del teléfono.
+Para ver tus datos desde varios dispositivos y registrar por Telegram.
+Todo se hace desde la app: Más > Conectar con mi hoja, y sigue los 6 pasos
+(crear hoja, pegar el código que la app copia, ejecutar instalarTodo, implementar como
+Aplicación web con acceso "Cualquier persona", pegar la URL /exec).
+Para otro dispositivo: en el primero, Más > Mi hoja > "Copiar enlace para otro dispositivo" y pégalo en el segundo.
+Ese enlace incluye tu clave de conexión: no lo compartas.
 
-DATOS Y PRIVACIDAD
-- Los datos viven en el celular de cada persona. Quien publica el enlace no puede verlos.
-- Con Google, la copia queda en la carpeta oculta de la app en el Drive de cada persona, no en el tuyo.
-- El PIN bloquea la pantalla; no cifra los datos.
-- Si olvidan el PIN: "Olvidé mi PIN" > restaurar copia (archivo o Google) con PIN nuevo, o empezar de cero.
-- Cambiar de celular: abrir el enlace en el nuevo > "Entrar con Google" o "Ya tengo una copia de seguridad".
-- La hoja de Google que crea la app es solo de lectura en la práctica: se copia desde la app hacia la hoja, no al revés.
+─────────────────────────────────────────
+4. INTELIGENCIA ARTIFICIAL (opcional)
+─────────────────────────────────────────
+Cada persona usa su propia clave gratuita de Gemini: aistudio.google.com/apikey
+Pégala en Más > Inteligencia artificial. Si tu hoja está conectada, la app también la guarda en tu hoja
+para que el bot de Telegram entienda frases como "gasté 25 en almuerzo".
 
-ACTUALIZAR LA APP MÁS ADELANTE
-Vuelve a subir los archivos al mismo sitio. Al abrir la app dos veces seguidas con internet, se actualiza sola.
+─────────────────────────────────────────
+5. TELEGRAM (opcional, requiere la hoja)
+─────────────────────────────────────────
+Más > Mi hoja > Telegram: crea tu bot con @BotFather, consulta tu ID con @userinfobot, pega ambos y toca Conectar.
 
-ASESOR CON IA (opcional)
-Más > Inteligencia artificial: cada persona pega su clave gratuita de Gemini (aistudio.google.com/apikey).
+─────────────────────────────────────────
+6. BOLSA
+─────────────────────────────────────────
+Los precios de acciones se consultan a través de tu hoja conectada (tu propio script).
+Sin hoja, la pestaña Bolsa no aparece. Alternativa avanzada: publicar tu propio proxy con proxy-bolsa.js
+y poner su dirección en config.js (PROXY_URL).
+
+─────────────────────────────────────────
+SI LA APP NO ABRE
+─────────────────────────────────────────
+Aparecerá "La app no pudo iniciar" con el botón "Reparar y volver a abrir": borra solo la copia guardada
+de la app (no tus datos) y la vuelve a descargar. Si persiste, el "Detalle técnico" dice qué archivo falla.

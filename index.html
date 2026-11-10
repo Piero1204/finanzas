@@ -18,12 +18,12 @@
 <script src="jspdf.umd.min.js"></script>
 <script src="jspdf.plugin.autotable.min.js"></script>
 <script>(function(){
-window.LOCAL_MODE=true;
+window.LOCAL_MODE=true;window.APP_VER='20261110-1205';
 let w=null,n=0;const pend={};
 try{
-  w=new Worker('worker.js');
+  w=new Worker('worker.js?v='+window.APP_VER);
   w.onmessage=function(e){const m=e.data;if(m.aviso){console.warn(m.aviso);return}const p=pend[m.id];if(!p)return;delete pend[m.id];m.err?p.no(new Error(m.err)):p.ok(m.res)};
-  w.onerror=function(e){console.error(e.message||e)};
+  w.onerror=function(e){window.__werr=(e.message||'error')+(e.filename?' ('+String(e.filename).split('/').pop()+')':'');console.error(e.message||e)};
 }catch(e){}
 window.LOCALAPI=function(op,a){return new Promise(function(ok,no){if(!w){no(new Error('Tu navegador no es compatible. Abre el enlace con Chrome o Safari actualizado.'));return}const id=++n;pend[id]={ok:ok,no:no};w.postMessage({id:id,op:op,a:a})})};
 function runner(){let s,f;const o={withSuccessHandler:function(x){s=x;return o},withFailureHandler:function(x){f=x;return o},apiLlamar:function(nombre,args,token){LOCALAPI('llamar',{nombre:nombre,args:args,token:token}).then(s,f)}};return o}
@@ -440,15 +440,36 @@ document.addEventListener('visibilitychange',()=>{
   if(document.hidden){ULT_OCULTO=Date.now();return}
   if(TOKEN&&ULT_OCULTO&&Date.now()-ULT_OCULTO>5*60*1000){TOKEN='';S.d=null;mostrarLogin()}
 });
+const APP_V=window.APP_VER;
+async function sanar(){
+  try{const k=await caches.keys();await Promise.all(k.map(x=>caches.delete(x)))}catch(e){}
+  try{const r=await navigator.serviceWorker.getRegistrations();await Promise.all(r.map(x=>x.unregister()))}catch(e){}
+  location.reload()
+}
+function mostrarFallo(detalle){
+  $('#app').innerHTML='<div class="wrap"><div class="card" style="margin-top:40px"><h3>La app no pudo iniciar</h3><div class="note">Tus datos están a salvo: viven en este dispositivo y esta pantalla no los toca. Suele pasar cuando el teléfono guardó una versión vieja de la app.</div>'
+    +'<button class="btn" id="fxR">Reparar y volver a abrir</button><button class="btn sec" id="fxT">Reintentar</button>'
+    +'<div class="bn" style="word-break:break-word">Detalle técnico: '+esc(detalle||'sin detalle')+(window.__werr?' · motor: '+esc(window.__werr):'')+' · app '+APP_V+'</div></div></div>';
+  const r=document.getElementById('fxR'),t=document.getElementById('fxT');
+  if(r)r.onclick=()=>{r.disabled=true;r.textContent='Reparando…';sanar()};
+  if(t)t.onclick=()=>iniciar();
+}
+function conTiempo(p,ms,msg){let t;return Promise.race([p,new Promise((_,no)=>{t=setTimeout(()=>no(new Error(msg)),ms)})]).finally(()=>clearTimeout(t))}
 async function iniciar(){
   $('#app').innerHTML='<div class="wrap"><div class="sk"></div><div class="sk" style="height:150px"></div><div class="sk"></div></div>';
   try{
-    const s=await api('sesion',{});
+    const s=await conTiempo(api('sesion',{}),15000,'El motor de la app no respondió');
+    let v='';try{v=await conTiempo(LOCALAPI('version',{}),4000,'sin versión')}catch(e){}
+    if(v!==APP_V){
+      let ya='';try{ya=sessionStorage.getItem('sanado')||''}catch(e){}
+      if(!ya&&APP_V!=='dev'){try{sessionStorage.setItem('sanado','1')}catch(e){}sanar();return}
+      if(APP_V!=='dev'){mostrarFallo('Las piezas de la app no coinciden (página '+APP_V+', motor '+(v||'antiguo')+'). Sube a GitHub todos los archivos de la entrega, incluido gs-bundle.js.');return}
+    }
     if(!s.autorizado){mostrarLogin(s);return}
     S.usuario=s.usuario;
     pintarTabs();
     await cargar(false);
-  }catch(e){if(e.message!=='auth')$('#app').innerHTML='<div class="wrap"><div class="card empty"><b>No se pudo cargar</b>'+esc(e.message)+'<button class="btn" onclick="iniciar()">Reintentar</button></div></div>'}
+  }catch(e){if(e.message!=='auth')mostrarFallo(e.message)}
 }
 async function cargar(silencioso){
   try{
@@ -463,7 +484,7 @@ async function cargar(silencioso){
 /* ================= shell ================= */
 const TABS=[['inicio','Inicio','layout-grid'],['cuentas','Cuentas','wallet'],['movs','Movs','arrow-left-right'],['inversiones','Bolsa','trending-up'],['negocios','Negocios','briefcase'],['deudas','Deudas','handshake'],['mas','Más','menu']];
 function pintarTabs(){
-  $('#tabsIn').innerHTML=TABS.map(t=>'<button data-t="'+t[0]+'" class="'+(S.tab===t[0]?'on':'')+'">'+ic(t[2])+'<span>'+t[1]+'</span></button>').join('');
+  $('#tabsIn').innerHTML=TABS.filter(t=>t[0]!=='inversiones'||bolsaOn()).map(t=>'<button data-t="'+t[0]+'" class="'+(S.tab===t[0]?'on':'')+'">'+ic(t[2])+'<span>'+t[1]+'</span></button>').join('');
   $('#tabs').classList.remove('hide');
   $('#tabsIn').onclick=e=>{const b=e.target.closest('button');if(!b)return;irTab(b.dataset.t)};
   icons();
@@ -1557,7 +1578,7 @@ function vMas(){
   h+='<div class="card menu"><h3>Analista IA</h3>'+it('asesor','message-circle','Analista financiero','Pregúntale lo que quieras sobre tu dinero: calcula con tus datos reales')+it('perfil','user-round-search','Mi perfil financiero','Tus hábitos, fortalezas y qué mejorar')+'</div>';
   h+='<div class="card menu"><h3>Planificación</h3>'+it('plan','pie-chart','Plan del mes','Reparto, presupuestos y lo que te queda')+it('metas','target','Metas','Ingresos y ahorro')+it('pagos','calendar-clock','Pagos','Programados, recurrentes y puntualidad')+'</div>';
   h+='<div class="card menu"><h3>Orden</h3>'+it('categorias','tags','Categorías','Subcategorías y tipo de ingreso')+it('reglas','wand-sparkles','Reglas automáticas','Clasifican tus gastos por palabra clave')+it('ajustes','sliders-horizontal','Predeterminados','Medio de pago y cuenta')+'</div>';
-  h+='<div class="card menu"><h3>Sistema</h3>'+it('copia','database-backup','Copia de seguridad','Guarda o restaura tus datos')+it('exportar','file-spreadsheet','Exportar movimientos','Archivo CSV')+it('ia','sparkles','Inteligencia artificial','Clave gratuita de Gemini para el asesor')+it('pdf','file-text','Reportes en PDF','Mensual o anual, para guardar o compartir')+it('avisos','bell','Avisos','Calendario y recordatorios')+it('hoja','table','Conectar con mi hoja','Sincroniza con tu Google Sheets y Telegram')+it('pin','lock','Cambiar PIN','')+it('tema','sun-moon','Tema','Claro u oscuro')+'</div>';
+  h+='<div class="card menu"><h3>Sistema</h3>'+it('copia','database-backup','Copia de seguridad','Guarda o restaura tus datos')+it('exportar','file-spreadsheet','Exportar movimientos','Archivo CSV')+it('ia','sparkles','Inteligencia artificial','Tu clave gratuita de Gemini para el analista')+it('pdf','file-text','Reportes en PDF','Mensual o anual, para guardar o compartir')+it('avisos','bell','Avisos','Calendario y recordatorios')+it('hoja','table','Conectar con mi hoja','Sincroniza con tu Google Sheets y Telegram')+it('pin','lock','Cambiar PIN','')+it('tema','sun-moon','Tema','Claro u oscuro')+'</div>';
   return h;
 }
 function postMas(){document.querySelectorAll('[data-m]').forEach(b=>b.onclick=()=>abrirMas(b.dataset.m))}
@@ -1913,8 +1934,8 @@ function sCambiarPin(){
 }
 function sClaveIA(pregunta){
   LOCALAPI('getProp',{k:'GEMINI_API_KEY'}).then(tiene=>{
-    abrirSheet('Inteligencia artificial','<div class="note">El asesor usa Gemini de Google, que es gratis. Necesitas una clave personal:<br>1. Entra a <b>aistudio.google.com/apikey</b><br>2. Toca «Create API key» y cópiala<br>3. Pégala aquí</div><label>Clave de Gemini</label><input id="iaK" type="password" autocomplete="off" placeholder="'+(tiene?'Ya hay una guardada':'Pega tu clave')+'"><button class="btn" id="iaOk">Guardar</button>'+(tiene?'<button class="btn sec" id="iaX">Quitar la clave</button>':'')+'<div class="bn">La clave se queda solo en este teléfono. A la IA solo se envía un resumen de tus números.</div>');
-    bind('iaOk',e=>{const k=val('iaK').trim();if(!k){toast('Pega la clave.',true);return}LOCALAPI('setProp',{k:'GEMINI_API_KEY',v:k}).then(()=>{toast('Guardada ✓');if(pregunta!==undefined)sAsesor(pregunta||undefined);else cerrarSheet()})});
+    abrirSheet('Inteligencia artificial','<div class="note">El analista usa Gemini de Google, que es gratis. La clave es tuya y solo se guarda en tu dispositivo (y en tu hoja, si la conectas). Necesitas una clave personal:<br>1. Entra a <b>aistudio.google.com/apikey</b><br>2. Toca «Create API key» y cópiala<br>3. Pégala aquí</div><label>Clave de Gemini</label><input id="iaK" type="password" autocomplete="off" placeholder="'+(tiene?'Ya hay una guardada':'Pega tu clave')+'"><button class="btn" id="iaOk">Guardar</button>'+(tiene?'<button class="btn sec" id="iaX">Quitar la clave</button>':'')+'<div class="bn">La clave se queda solo en este teléfono. A la IA solo se envía un resumen de tus números.</div>');
+    bind('iaOk',e=>{const k=val('iaK').trim();if(!k){toast('Pega la clave.',true);return}LOCALAPI('setProp',{k:'GEMINI_API_KEY',v:k}).then(async()=>{if(hOn())try{await hLlamar('guardarClaveIA',{clave:k,proveedor:'gemini'})}catch(x){toast('Se guardó aquí, pero no pude enviarla a tu hoja: '+x.message,true)}toast('Guardada ✓');if(pregunta!==undefined)sAsesor(pregunta||undefined);else cerrarSheet()})});
     bind('iaX',()=>LOCALAPI('setProp',{k:'GEMINI_API_KEY',v:''}).then(()=>{toast('Clave eliminada');cerrarSheet()}));
   });
 }
@@ -1930,7 +1951,7 @@ function avisoCopia(){
 const render0=render;
 render=function(){render0();if(S.tab==='inicio')avisoCopia()};
 const iniciar0=iniciar;
-iniciar=async function(){if(!hOn())try{await LOCALAPI('tareas',{})}catch(e){}await iniciar0()};
+iniciar=async function(){if(!hOn())try{await conTiempo(LOCALAPI('tareas',{}),8000,'motor sin respuesta')}catch(e){}await iniciar0()};
 
 /* ================= ARCHIVOS, REPORTES PDF ================= */
 async function entregarArchivo(file){
@@ -2047,7 +2068,10 @@ api=function(n,a){return api0(n,a).then(r=>{if(ESCRIBE.test(n))hEncolar(n,a);ret
 function cuandoTxt(k){const t=Number(localStorage.getItem(k)||0);return t?new Date(t).toLocaleString('es-PE',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'nunca'}
 const cargar0=cargar;
 cargar=async function(s){await cargar0(s);if(!cargar.vez){cargar.vez=1;hAlAbrir();avisarAlAbrir()}};
-if(!(window.APP_CONFIG&&APP_CONFIG.PROXY_URL)){const i=TABS.findIndex(t=>t[0]==='inversiones');if(i>=0)TABS.splice(i,1)}
+/* La bolsa necesita salir a internet: con tu hoja conectada la consulta tu propio script; sin ella, solo si configuraste un proxy propio */
+const BOLSA_HOJA=/^(ideasAcciones|historialPortafolio|inversiones|dividendosSugeridos|resumenInversiones)$/;
+const api1=api;api=function(n,a){if(hOn()&&BOLSA_HOJA.test(n))return hLlamar(n,a);return api1(n,a)};
+function bolsaOn(){return !!(window.APP_CONFIG&&APP_CONFIG.PROXY_URL)||hOn()}
 
 /* ================= MODO HOJA: esta app se sincroniza con tu Google Sheets (y con Telegram) =================
    La hoja manda. La app lee de su copia local (rápido, también sin internet), envía a la hoja cada cambio que haces
@@ -2063,7 +2087,8 @@ async function hPeticion(nombre,args,token){
   try{r=await fetch(u+(u.indexOf('?')===-1?'?':'&')+'api=1',{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({nombre:nombre,args:args||{},token:token||''}),signal:ctl.signal})}
   catch(e){const x=new Error('Sin conexión con tu hoja');x.red=true;throw x}
   finally{clearTimeout(tm)}
-  let j;try{j=await r.json()}catch(e){const x=new Error('Tu hoja no respondió como se esperaba. Revisa la URL y que hayas publicado la nueva versión de la implementación.');x.red=true;throw x}
+  let j,tx='';try{tx=await r.text();j=JSON.parse(tx)}catch(e){
+    const x=new Error(/accounts\.google|ServiceLogin|Sign in|Iniciar sesión/i.test(tx)?'Tu implementación no es pública. Al implementar elige «Quién tiene acceso: Cualquier persona» y vuelve a copiar la URL.':'Tu hoja no respondió como se esperaba. Revisa que la URL termine en /exec y que hayas implementado la versión más reciente del código.');x.red=true;throw x}
   return j
 }
 async function hLogin(){
@@ -2130,38 +2155,76 @@ function hAlAbrir(){if(hOn())hSincronizar()}
 setInterval(()=>{if(hOn()&&!document.hidden&&TOKEN&&!sheetOn())hSincronizar()},90000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&hOn()&&TOKEN)hSincronizar()});
 window.addEventListener('online',()=>{if(hOn())hSincronizar()});
+function genClave(){const a=new Uint8Array(12);crypto.getRandomValues(a);return Array.from(a,x=>'abcdefghjkmnpqrstuvwxyz23456789'[x%31]).join('')}
+async function copiarTexto(t){
+  try{await navigator.clipboard.writeText(t);return true}catch(e){}
+  try{const ta=document.createElement('textarea');ta.value=t;ta.style.cssText='position:fixed;opacity:0';document.body.appendChild(ta);ta.select();const ok=document.execCommand('copy');ta.remove();return ok}catch(e){return false}
+}
 function sHoja(){
-  if(!hOn()){
-    abrirSheet('Conectar con mi hoja','<div class="note">Solo para ti: sincroniza esta app con tu Google Sheets del sistema original. Lo que registres por Telegram aparece aquí y lo que registres aquí aparece en la hoja. <b>La hoja manda</b>: al conectar, los datos de este dispositivo se reemplazan por los de tu hoja.</div>'
-      +'<label style="margin-top:0">URL de tu aplicación web (termina en /exec)</label><input id="hU" type="url" placeholder="https://script.google.com/macros/s/…/exec" autocapitalize="off" autocorrect="off" spellcheck="false">'
-      +'<label>PIN de tu hoja (el DASHBOARD_PIN)</label><input id="hP" type="password" inputmode="numeric" autocomplete="off">'
-      +'<button class="btn" id="hCon">Conectar</button>');
-    bind('hCon',async e=>{
-      const u=val('hU').trim(),p=val('hP').trim();
-      if(u.indexOf('https://script.google.com/')!==0){toast('La URL debe empezar con https://script.google.com/',true);return}
-      if(!p){toast('Escribe el PIN de tu hoja.',true);return}
-      if(!confirm('Se reemplazarán TODOS los datos de este dispositivo por los de tu hoja. ¿Continuar?'))return;
-      const b=e.currentTarget;b.disabled=true;b.textContent='Conectando…';
-      try{
-        sv('hUrl',u);sv('hPin',p);localStorage.removeItem('hTok');
-        await hLogin();
-        ['hCola','hVer','hErr','hRed'].forEach(k=>localStorage.removeItem(k));
-        sv('hOn','1');
-        await hTraer(true);
-        cerrarSheet();toast('Conectada ✓');cargar(true)
-      }catch(x){
-        ['hOn','hUrl','hPin','hTok','hTokExp'].forEach(k=>localStorage.removeItem(k));toast(x.message,true);b.disabled=false;b.textContent='Conectar'
+  if(hOn())return sHojaOn();
+  let clave=localStorage.getItem('hClaveGen');if(!clave){clave=genClave();sv('hClaveGen',clave)}
+  const paso=(n,t)=>'<div style="display:flex;gap:10px;margin:10px 0"><div style="flex:0 0 26px;height:26px;border-radius:50%;background:var(--ac);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px">'+n+'</div><div style="flex:1;font-size:14px;line-height:1.45">'+t+'</div></div>';
+  abrirSheet('Conectar con mi hoja','<div class="note">Guarda tus datos en <b>tu propia hoja de Google</b>: los ves desde cualquier dispositivo y, si quieres, también registras por Telegram. La hoja es tuya: nadie más tiene acceso.</div>'
+    +'<div class="bn" style="margin:12px 0 2px">Ya tengo mi enlace</div>'
+    +'<input id="hU" type="url" placeholder="Pega aquí tu enlace (https://script.google.com/…)" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn" id="hCon">Conectar</button>'
+    +'<div class="bn" style="margin:18px 0 2px">Primera vez: crear mi hoja (unos 5 minutos)</div>'
+    +paso(1,'Crea una hoja nueva de Google. <button class="chip" id="hSh">Abrir hoja nueva</button>')
+    +paso(2,'En esa hoja entra a <b>Extensiones → Apps Script</b> y borra el código que aparezca.')
+    +paso(3,'Copia el código de la app y pégalo ahí. <button class="chip" id="hCp">Copiar código</button> Luego toca el icono de guardar.')
+    +paso(4,'Arriba elige la función <b>instalarTodo</b> y toca <b>Ejecutar</b>. Acepta los permisos (si Google avisa, toca «Avanzado → Ir a… (no seguro)»: es tu propio código).')
+    +paso(5,'Toca <b>Implementar → Nueva implementación → Aplicación web</b>. En «Quién tiene acceso» elige <b>Cualquier persona</b> y copia la URL que termina en <b>/exec</b>.')
+    +paso(6,'Pégala arriba y toca <b>Conectar</b>.')
+    +'<div class="bn">Tus datos solo viven en tu hoja y en tus dispositivos. El código incluye una clave de conexión que la app guarda aquí; no la compartas.</div>');
+  bind('hSh',()=>window.open('https://sheets.new','_blank','noopener'));
+  bind('hCp',async e=>{
+    const b=e.currentTarget;b.disabled=true;
+    try{
+      const r=await fetch('codigo-hoja.gs',{cache:'no-cache'});if(!r.ok)throw new Error('No pude leer el código (falta codigo-hoja.gs en la app).');
+      const t=(await r.text()).replace('__CLAVE_APP__',clave);
+      if(await copiarTexto(t))toast('Código copiado ✓ Pégalo en Apps Script');else throw new Error('Tu navegador no permitió copiar. Prueba con Chrome.')
+    }catch(x){toast(x.message,true)}
+    b.disabled=false
+  });
+  bind('hCon',async e=>{
+    const raw=val('hU').trim(),partes=raw.split('#'),u=partes[0],k=(partes[1]||clave).trim();
+    if(u.indexOf('https://script.google.com/')!==0){toast('El enlace debe empezar con https://script.google.com/',true);return}
+    if(!/\/exec$/.test(u)){toast('El enlace debe terminar en /exec (es la URL de «Aplicación web»).',true);return}
+    const b=e.currentTarget;b.disabled=true;b.textContent='Conectando…';
+    const limpiar=()=>['hOn','hUrl','hPin','hTok','hTokExp'].forEach(x=>localStorage.removeItem(x));
+    try{
+      sv('hUrl',u);sv('hPin',k);localStorage.removeItem('hTok');
+      await hLogin();
+      let est;try{est=await hLlamar('estadoHoja',{})}catch(x){throw new Error(/desconocida/i.test(x.message)?'Tu script es de una versión anterior. Copia el código de nuevo, pégalo en Apps Script y vuelve a implementar.':x.message)}
+      const tengo=!!(S.d&&S.d.recientes&&S.d.recientes.length);
+      let subir=false;
+      if(est.movimientos===0&&tengo){
+        if(!confirm('Tu hoja está vacía y este dispositivo ya tiene datos.\n\nAceptar = subir los datos de este dispositivo a tu hoja.\nCancelar = no conectar todavía.')){limpiar();b.disabled=false;b.textContent='Conectar';return}
+        subir=true
+      }else if(est.movimientos>0&&tengo){
+        if(!confirm('Tu hoja ya tiene datos. Se reemplazarán los de ESTE dispositivo por los de tu hoja.\n\n¿Continuar?')){limpiar();b.disabled=false;b.textContent='Conectar';return}
       }
-    });
-    return
-  }
+      ['hCola','hVer','hErr','hRed'].forEach(x=>localStorage.removeItem(x));
+      if(subir){b.textContent='Subiendo tus datos…';const exp=await LOCALAPI('exportar',{});await hLlamar('importarDesdeLocal',{json:exp})}
+      sv('hOn','1');
+      b.textContent='Descargando de tu hoja…';
+      await hTraer(true);
+      localStorage.removeItem('hClaveGen');
+      pintarTabs();cerrarSheet();toast(subir?'Datos subidos y conectada ✓':'Conectada ✓');cargar(true)
+    }catch(x){limpiar();toast(x.message,true);b.disabled=false;b.textContent='Conectar'}
+  });
+}
+function sHojaOn(){
   const n=hCola().length,err=localStorage.getItem('hErr');
   abrirSheet('Mi hoja','<div class="row2"><div class="mid"><b>Conectada</b><small>Última revisión: '+cuandoTxt('hUlt')+'</small></div></div>'
     +(n?'<div class="note warn">'+n+' cambio'+(n===1?'':'s')+' por enviar a tu hoja'+(localStorage.getItem('hRed')?' (sin conexión; se reintenta solo)':'')+'.</div>':'')
     +(err?'<div class="note warn">'+esc(err)+'</div>':'')
-    +'<button class="btn" id="hSy">Sincronizar ahora</button><button class="btn sec" id="hOff">Desconectar</button>');
+    +'<div class="bn" style="margin:14px 0 2px">Telegram (opcional)</div><div class="note">Registra gastos escribiéndole a tu propio bot. 1) En Telegram habla con <b>@BotFather</b> → /newbot y copia el token. 2) Habla con <b>@userinfobot</b> para ver tu ID. Si tienes clave de IA (Más → Inteligencia artificial), el bot entiende frases como «gasté 25 en almuerzo».</div><input id="tgT" placeholder="Token del bot" autocapitalize="off" autocorrect="off" spellcheck="false"><input id="tgC" inputmode="numeric" placeholder="Tu ID de chat (números)" style="margin-top:8px"><button class="btn sec" id="tgOk">Conectar Telegram</button>'
+    +'<button class="btn" id="hSy">Sincronizar ahora</button><button class="btn sec" id="hEn">Copiar enlace para otro dispositivo</button><button class="btn sec" id="hOff">Desconectar</button>'
+    +'<div class="bn">El enlace para otro dispositivo incluye tu clave de conexión: pégalo en «Conectar con mi hoja» del otro teléfono. No lo compartas con nadie.</div>');
+  bind('tgOk',async e=>{const b=e.currentTarget;b.disabled=true;try{await hLlamar('guardarTelegram',{token:val('tgT'),chatId:val('tgC'),url:localStorage.getItem('hUrl')});toast('Telegram conectado ✓ Escríbele /ayuda a tu bot');$('#tgT').value=''}catch(x){toast(/desconocida/i.test(x.message)?'Tu script es antiguo: copia el código de nuevo y vuelve a implementar.':x.message,true)}b.disabled=false});
   bind('hSy',e=>{e.currentTarget.disabled=true;hSincronizar(true).then(()=>sHoja())});
-  bind('hOff',()=>{if(!confirm('¿Desconectar de tu hoja? Esta app se queda con los datos que tiene ahora y vuelve a funcionar sola.'))return;['hOn','hUrl','hPin','hTok','hTokExp','hCola','hVer','hErr','hRed','hUlt'].forEach(k=>localStorage.removeItem(k));toast('Desconectada');cerrarSheet()})
+  bind('hEn',async()=>{const t=localStorage.getItem('hUrl')+'#'+localStorage.getItem('hPin');if(await copiarTexto(t))toast('Enlace copiado ✓');else toast('No pude copiar.',true)});
+  bind('hOff',()=>{if(!confirm('¿Desconectar de tu hoja? Esta app se queda con los datos que tiene ahora y vuelve a funcionar sola.'))return;['hOn','hUrl','hPin','hTok','hTokExp','hCola','hVer','hErr','hRed','hUlt'].forEach(k=>localStorage.removeItem(k));pintarTabs();toast('Desconectada');cerrarSheet()})
 }
 
 
