@@ -55,7 +55,8 @@ self.__host = {
   }
 };
 
-importScripts('config.js', 'shim.js', 'gs-bundle.js', 'prelude.js');
+const VQ = self.location.search || '';   // ?v=versión: evita que el navegador reutilice piezas viejas guardadas
+importScripts('config.js' + VQ, 'shim.js' + VQ, 'gs-bundle.js' + VQ, 'prelude.js' + VQ);
 
 let listo = abrirDB().then(function () { return idb('readonly', function (s) { return s.get(KEY); }); }).then(function (txt) { if (txt) restaurar(txt); });
 
@@ -68,6 +69,7 @@ function aleatorio() { const a = new Uint8Array(16); crypto.getRandomValues(a); 
 function pinValido(p) { p = String(p || '').trim(); if (!/^\d{4,8}$/.test(p)) throw new Error('El PIN debe tener de 4 a 8 números.'); return p; }
 
 const ops = {
+  version: function () { return self.APP_V || ''; },
   estado: function () { return { tienePin: !!self.PropertiesService.getScriptProperties().getProperty('DASHBOARD_PIN') }; },
   crearPin: function (a) {
     const P = self.PropertiesService.getScriptProperties();

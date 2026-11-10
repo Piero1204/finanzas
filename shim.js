@@ -92,7 +92,7 @@
     lastRow: function () { let l = 0; this.d.forEach(function (r, i) { if (r.some(function (x) { return x !== '' && x !== undefined && x !== null; })) l = i + 1; }); return l; },
     width: function () { let w = 1; this.d.forEach(function (r) { if (r.length > w) w = r.length; }); return w; },
     getLastColumn: function () { return this.width(); }, getLastRow: function () { return this.lastRow(); }, getMaxRows: function () { return Math.max(1000, this.d.length); },
-    insertRowsAfter: function () {}, getSheetId: function () { return this.id; }, getName: function () { return this.name; },
+    insertRowsAfter: function () {}, insertColumnsAfter: function () {}, getMaxColumns: function () { return Math.max(26, this.width()); }, clearContents: function () { this.d = [[]]; dirty(); return this; }, getSheetId: function () { return this.id; }, getName: function () { return this.name; },
     deleteRow: function (n) { this.d.splice(n - 1, 1); dirty(); },
     setTabColor: function () {}, setFrozenRows: function () {}, autoResizeColumns: function () {}, setColumnWidths: function () {}, setRowHeight: function () {},
     clear: function () { this.d = [[]]; dirty(); },
@@ -137,6 +137,7 @@
   // ---------- Utilities ----------
   const p2 = function (n) { return String(n).padStart(2, '0'); };
   G.Utilities = {
+    getUuid: function () { return (self.crypto && self.crypto.randomUUID) ? self.crypto.randomUUID() : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) { const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16); }); },
     sleep: function () {},
     formatDate: function (d, tz, f) {
       return f.replace(/'([^']*)'|yyyy|MM|dd|HH|mm|ss|H|u/g, function (t, lit) {
