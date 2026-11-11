@@ -1,4 +1,4 @@
-self.APP_V='20261111-1110';
+self.APP_V='20261111-1133';
 /* ==== 00_Config.gs ==== */
 /**
  * ============================================================
@@ -4954,7 +4954,17 @@ function api_prestamos() {
 
 function api_crearPrestamo(a) { a.deudor = canonPersona_(a.deudor); return registrarPrestamoOtorgado(a); }
 function api_cobrarInteres(a) { return registrarCobroInteresPrestamo(a.id, a.monto, a.cuentaId, a.fecha); }
-function api_devolverCapital(a) { return registrarDevolucionCapitalPrestamo(a.id, a.monto, a.cuentaId, a.fecha); }
+function api_devolverCapital(a) {
+  const partes = partesCobro_(a);
+  if (partes.length > 1) {
+    const p = buscarFilaPorId_('PrestamosOtorgados', a.id);
+    if (!p) throw new Error('Préstamo no encontrado.');
+    const total = redondear_(partes.reduce(function (s, x) { return s + x.monto; }, 0));
+    if (total > numero_(p.fila[10]) + 0.005) throw new Error('Entre todas las cuentas suman ' + total + ', más del saldo pendiente (' + redondear_(numero_(p.fila[10])) + ').');
+  }
+  partes.forEach(function (x) { registrarDevolucionCapitalPrestamo(a.id, x.monto, x.cuentaId, a.fecha); });
+  return true;
+}
 function api_crearDeuda(a) { return registrarDeudaRecibida(a); }
 function api_pagarCuota(a) { registrarPagoCuotaDeuda(a.id, a.cuentaId, a.fecha); return true; }
 
@@ -6020,7 +6030,41 @@ function api_compraParaOtro(a) {
 }
 
 /** Me pagó (total o parcial): se aplica a sus deudas más antiguas de esa moneda y entra a una cuenta */
+/**
+ * Cobro a una persona. Si te pagó en varias cuentas (ej: 10 en efectivo y 90 por banco) manda partes: [{ monto, cuentaId }].
+ * Se valida el total antes de mover nada, así nunca queda un cobro a medias.
+ */
 function api_cobrarPersona(a) {
+  const partes = partesCobro_(a);
+  if (partes.length === 1) return cobrarPersonaUna_(Object.assign({}, a, partes[0]));
+  const total = redondear_(partes.reduce(function (s, x) { return s + x.monto; }, 0));
+  const debe = deudaPersona_(String(a.persona || '').trim(), validarMoneda_(a.moneda));
+  if (total > debe + 0.005) throw new Error('Entre todas las cuentas suman ' + total + ', más de lo que te debe (' + redondear_(debe) + ').');
+  partes.forEach(function (x) { cobrarPersonaUna_(Object.assign({}, a, x)); });
+  return true;
+}
+
+/** Normaliza { monto, cuentaId } o partes:[{monto,cuentaId}] a una lista válida */
+function partesCobro_(a) {
+  const lista = Array.isArray(a.partes) && a.partes.length ? a.partes : [{ monto: a.monto, cuentaId: a.cuentaId }];
+  const out = lista.map(function (x) { return { monto: validarMonto_(x.monto, 'Cada monto'), cuentaId: x.cuentaId }; });
+  if (out.length > 1 && out.some(function (x) { return x.cuentaId === '' || x.cuentaId === undefined; })) throw new Error('Elige la cuenta de cada parte.');
+  return out;
+}
+
+/** Cuánto te debe una persona en una moneda (préstamos abiertos) */
+function deudaPersona_(persona, moneda) {
+  const po = leerHoja_('PrestamosOtorgados');
+  let t = 0;
+  for (let i = 1; i < po.length; i++) {
+    const f = po[i];
+    if (f[0] === '' || String(f[9]).trim() === 'Pagado' || String(f[2]) !== moneda || normNombre_(f[1]) !== normNombre_(persona)) continue;
+    t += numero_(f[10]);
+  }
+  return t;
+}
+
+function cobrarPersonaUna_(a) {
   const persona = String(a.persona || '').trim();
   const moneda = validarMoneda_(a.moneda);
   let resto = validarMonto_(a.monto, 'El monto');
