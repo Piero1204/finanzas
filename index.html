@@ -18,7 +18,7 @@
 <script src="jspdf.umd.min.js"></script>
 <script src="jspdf.plugin.autotable.min.js"></script>
 <script>(function(){
-window.LOCAL_MODE=true;window.APP_VER='20261111-1110';
+window.LOCAL_MODE=true;window.APP_VER='20261111-1133';
 let w=null,n=0;const pend={};
 try{
   w=new Worker('worker.js?v='+window.APP_VER);
@@ -1799,11 +1799,35 @@ async function sPrestamos(tab){
   b.querySelectorAll('[data-pe]').forEach(x=>x.onclick=ev=>{ev.stopPropagation();formEditarPrestamo(r.otorgados.find(p=>String(p.id)===x.dataset.pe))});
   b.querySelectorAll('[data-pd]').forEach(x=>x.onclick=()=>cuotasDeuda(r.deudas.find(p=>String(p.id)===x.dataset.pd)));
 }
+/* Te pagaron en varias cuentas: la cuenta principal recibe el total menos lo que pongas en otras cuentas */
+function repartoUI(boxId,linkId,moneda,idMonto,idCuenta){
+  const box=$('#'+boxId),filas=[];
+  const n=v=>Number(String(v).replace(',','.'))||0;
+  const pintar=()=>{
+    box.innerHTML=filas.map((f,i)=>'<div style="display:flex;gap:8px;margin-top:8px"><input data-rm="'+i+'" inputmode="decimal" placeholder="Monto" value="'+(f.m||'')+'" style="flex:0 0 34%"><select data-rc="'+i+'" style="flex:1">'+cuentaOpts(cuentasPor(moneda),f.c)+'</select><button class="chip" data-rx="'+i+'" aria-label="Quitar">✕</button></div>').join('')+(filas.length?'<div class="bn" id="'+boxId+'R"></div>':'');
+    box.querySelectorAll('[data-rm]').forEach(x=>x.oninput=()=>{filas[+x.dataset.rm].m=x.value;resumen()});
+    box.querySelectorAll('[data-rc]').forEach(x=>x.onchange=()=>{filas[+x.dataset.rc].c=x.value;resumen()});
+    box.querySelectorAll('[data-rx]').forEach(x=>x.onclick=()=>{filas.splice(+x.dataset.rx,1);pintar()});
+    $('#'+linkId).textContent=filas.length?'+ Otra cuenta más':'+ Me pagó en varias cuentas';
+    resumen()
+  };
+  const resumen=()=>{const r=document.getElementById(boxId+'R');if(!r)return;const otras=filas.reduce((t,f)=>t+n(f.m),0),prin=Math.round((n(val(idMonto))-otras)*100)/100;const sel=$('#'+idCuenta);const nom=sel&&sel.options[sel.selectedIndex]?sel.options[sel.selectedIndex].text:'la cuenta de arriba';r.innerHTML=prin<0?'<span style="color:var(--bad)">Las otras cuentas suman más que el total.</span>':'A <b style="color:var(--tx)">'+esc(nom)+'</b> llegan '+fm(prin,moneda)+'.'};
+  $('#'+linkId).onclick=()=>{const usadas=[val(idCuenta)].concat(filas.map(f=>f.c));const libre=cuentasPor(moneda).find(c=>usadas.indexOf(String(c.id))<0);filas.push({m:'',c:libre?String(libre.id):''});pintar();const u=box.querySelectorAll('[data-rm]');if(u.length)u[u.length-1].focus()};
+  [idMonto,idCuenta].forEach(id=>{const e=$('#'+id);if(e)e.addEventListener(e.tagName==='SELECT'?'change':'input',resumen)});
+  return {partes(){
+    if(!filas.length)return null;
+    const otras=filas.map(f=>({monto:n(f.m),cuentaId:f.c})).filter(f=>f.monto>0);
+    const prin=Math.round((n(val(idMonto))-otras.reduce((t,f)=>t+f.monto,0))*100)/100;
+    if(prin<0)throw new Error('Las otras cuentas suman más que el total que te pagaron.');
+    return (prin>0?[{monto:prin,cuentaId:val(idCuenta)}]:[]).concat(otras)
+  }}
+}
 function formCobroPersona(nombre,moneda,total){
   const T=tok();
-  abrirSheet('Cobro a '+nombre,'<div class="note">Te debe <b style="color:var(--tx)">'+fm(total,moneda)+'</b>. Se aplica primero a lo más antiguo.</div><label>¿Cuánto te pagó?</label><input id="cbM" inputmode="decimal" value="'+total+'" style="font-size:24px;font-weight:800"><label>Llega a</label><select id="cbC">'+cuentaOpts(cuentasPor(moneda),'')+'</select><label>Fecha</label><input id="cbF" type="date" value="'+hoyISO()+'"><div class="btns"><button class="btn sec" id="cbB">Volver</button><button class="btn" id="cbOk">Registrar cobro</button></div>');
+  abrirSheet('Cobro a '+nombre,'<div class="note">Te debe <b style="color:var(--tx)">'+fm(total,moneda)+'</b>. Se aplica primero a lo más antiguo.</div><label>¿Cuánto te pagó?</label><input id="cbM" inputmode="decimal" value="'+total+'" style="font-size:24px;font-weight:800"><label>Llega a</label><select id="cbC">'+cuentaOpts(cuentasPor(moneda),'')+'</select><div id="cbR"></div><a id="cbRL" class="mut" style="display:inline-block;font-size:13px;margin-top:8px;cursor:pointer">+ Me pagó en varias cuentas</a><label>Fecha</label><input id="cbF" type="date" value="'+hoyISO()+'"><div class="btns"><button class="btn sec" id="cbB">Volver</button><button class="btn" id="cbOk">Registrar cobro</button></div>');
   bind('cbB',()=>sPrestamos('deben'));
-  bind('cbOk',e=>hacer(e.currentTarget,()=>api('cobrarPersona',{token:T,persona:nombre,moneda,monto:val('cbM'),cuentaId:val('cbC'),fecha:val('cbF')}),'Cobro registrado ✓').then(()=>{cargar(true);sPrestamos('deben')}).catch(()=>{}));
+  const rp=repartoUI('cbR','cbRL',moneda,'cbM','cbC');
+  bind('cbOk',e=>hacer(e.currentTarget,()=>{const partes=rp.partes();return api('cobrarPersona',{token:T,persona:nombre,moneda,monto:val('cbM'),cuentaId:val('cbC'),fecha:val('cbF'),partes:partes||undefined})},'Cobro registrado ✓').then(()=>{cargar(true);sPrestamos('deben')}).catch(()=>{}));
 }
 function formEditarPrestamo(p){
   const T=tok();
@@ -1836,13 +1860,14 @@ async function accionPrestamo(p){
   let pagos=[];try{pagos=await api('prestamoPagos',{id:p.id})}catch(e){}
   let h='<div class="note">Saldo pendiente: <b style="color:var(--tx)">'+fm(p.saldo,p.moneda)+'</b> de '+fm(p.monto,p.moneda)+(p.tasa>0?' · interés mensual esperado '+fm(p.interesMensual,p.moneda):' · sin interés')+'.</div>';
   if(p.estado!=='Pagado'){
-    h+='<label>Monto recibido</label><input id="apM" inputmode="decimal" value="'+(p.tasa>0?p.interesMensual:p.saldo)+'"><label>Llega a</label><select id="apC">'+cuentaOpts(cuentasPor(p.moneda),'')+'</select><label>Fecha</label><input id="apF" type="date" value="'+hoyISO()+'">'
+    h+='<label>Monto recibido</label><input id="apM" inputmode="decimal" value="'+(p.tasa>0?p.interesMensual:p.saldo)+'"><label>Llega a</label><select id="apC">'+cuentaOpts(cuentasPor(p.moneda),'')+'</select><div id="apR"></div><a id="apRL" class="mut" style="display:inline-block;font-size:13px;margin-top:8px;cursor:pointer">+ Me pagó en varias cuentas</a><label>Fecha</label><input id="apF" type="date" value="'+hoyISO()+'">'
      +'<div class="two"><button class="btn" id="apK">Es capital (me devolvió)</button><button class="btn sec" id="apI">Es interés</button></div>';
   }
   h+='<div class="bn" style="margin:14px 0 4px">Historial</div>'+(pagos.length?pagos.map(filaMov).join(''):'<div class="empty">Aún sin movimientos.</div>')
    +'<div class="btns"><button class="btn sec" id="apE">'+ic('pencil')+' Editar</button><button class="btn sec" id="apB">Volver</button></div>';
   b.innerHTML=h;icons();
-  const go=(n,m)=>e=>hacer(e.currentTarget,()=>api(n,{token:T,id:p.id,monto:val('apM'),cuentaId:val('apC'),fecha:val('apF')}),m).then(()=>{cargar(true);sPrestamos()}).catch(()=>{});
+  const rp=p.estado!=='Pagado'?repartoUI('apR','apRL',p.moneda,'apM','apC'):{partes:()=>null};
+  const go=(n,m)=>e=>hacer(e.currentTarget,()=>{const partes=n==='devolverCapital'?rp.partes():null;if(n!=='devolverCapital'&&rp.partes())throw new Error('Repartir en varias cuentas es solo para capital.');return api(n,{token:T,id:p.id,monto:val('apM'),cuentaId:val('apC'),fecha:val('apF'),partes:partes||undefined})},m).then(()=>{cargar(true);sPrestamos()}).catch(()=>{});
   bind('apI',go('cobrarInteres','Interés registrado ✓'));bind('apK',go('devolverCapital','Capital registrado ✓'));bind('apB',()=>sPrestamos());bind('apE',()=>formEditarPrestamo(p));
   b.querySelectorAll('[data-mv]').forEach(x=>x.onclick=()=>detalleMov(x.dataset.mv));
 }
