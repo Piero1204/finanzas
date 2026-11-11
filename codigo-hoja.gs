@@ -4866,6 +4866,9 @@ function api_guardarRecurrente(a) {
   if (hojaR.getLastColumn() < 13) hojaR.getRange(1, 13).setValue('Confirmar');
   const filaR = buscarFilaPorId_('Recurrentes', idRec);
   if (filaR) hojaR.getRange(filaR.numeroFila, 13).setValue(a.confirmar ? 'SI' : 'NO');
+  // Si ya lo pagaste este mes (lo registraste hoy desde "Nuevo gasto"), que no se vuelva a cobrar hasta el próximo
+  const ult = a.ultima ? fecha_(a.ultima) : null;
+  if (filaR && ult) hojaR.getRange(filaR.numeroFila, 12).setValue(ult);
   return idRec;
 }
 function api_eliminarRecurrente(a) { return eliminarFilaPorId_('Recurrentes', a.id); }
