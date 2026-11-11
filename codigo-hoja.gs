@@ -1853,6 +1853,8 @@ function doPostInterno_(e) {
 
     try {
       if (mensaje.voice || mensaje.audio) procesarAudioTelegram_((mensaje.voice || mensaje.audio).file_id);
+      else if (mensaje.photo && mensaje.photo.length) procesarFotoTelegram_(mensaje.photo[mensaje.photo.length - 1].file_id, mensaje.caption || '');
+      else if (mensaje.document && /^image\//.test(String(mensaje.document.mime_type || ''))) procesarFotoTelegram_(mensaje.document.file_id, mensaje.caption || '');
       else if (mensaje.text) procesarComandoTelegram_(mensaje.text.trim());
     } catch (err) {
       enviarMensajeTelegram('❌ ' + escaparMd_(err.message));
@@ -1875,6 +1877,8 @@ function procesarCallbackTelegram_(cb) {
       realizarProgramado(partes[1], atras > 0 ? { fecha: cuando } : {});
       responderCallbackTelegram_(cb.id, 'Registrado ✅');
       enviarMensajeTelegram('✅ Registrado' + (atras > 0 ? ' con fecha de hace ' + atras + (atras === 1 ? ' día' : ' días') : ' con la fecha de hoy') + '. ' + escaparMd_(textoPuntualidadProgramado_(partes[1])));
+    } else if (partes[0] === 'pend') {
+      resolverPendienteTelegram_(cb, partes[1] === 'si', partes[2]);
     } else if (partes[0] === 'undo') {
       responderCallbackTelegram_(cb.id, deshacerLote_(partes[1]) ? 'Deshecho' : 'Ya estaba deshecho');
     } else if (partes[0] === 'cat') {
@@ -1896,7 +1900,7 @@ function procesarCallbackTelegram_(cb) {
 }
 
 var AYUDA_TELEGRAM_ =
-  '*Puedes escribirme normal o mandarme un audio*, por ejemplo: "gasté 5 soles en huevos", "me pagaron 600 del alquiler", "el viernes pago 80 dólares de internet".\n\n' +
+  '*Puedes escribirme normal, mandarme un audio o la foto de un recibo*, por ejemplo: "gasté 5 soles en huevos", "me pagaron 600 del alquiler", "el viernes pago 80 dólares de internet".\n\n' +
   '*Soy inteligente*: detecto solo si es gasto o ingreso, la categoría, la cuenta o tarjeta, y si dividiste la cuenta ("cena 80 soles con la BCP, dividí con Ana y Luis"). Si me falta el monto u otro dato, te lo pregunto. Escribe "cancela" para descartar.\n\n' +
   '*Comandos*\n' +
   '/saldo — saldos y patrimonio\n' +
@@ -2545,7 +2549,7 @@ var API_ESCRITURA_ = ['registrar', 'editarMovimiento', 'eliminarMovimiento', 'tr
   'eliminarCuenta', 'ajustarSaldo', 'editarProgramado', 'cancelarProgramado', 'eliminarProgramado', 'realizarProgramado', 'guardarMeta', 'eliminarMeta',
   'guardarPresupuesto', 'eliminarPresupuesto', 'guardarRecurrente', 'eliminarRecurrente', 'guardarRegla', 'eliminarRegla', 'guardarAjustes',
   'operacionInversion', 'eliminarOperacion', 'crearPrestamo', 'guardarProyecto', 'eliminarProyecto', 'asignarProyecto', 'guardarFondo', 'respaldoAhora', 'enviarExportacion', 'compraParaOtro', 'cobrarPersona', 'editarPrestamo', 'cerrarPrestamo', 'renombrarPersona', 'cobrarInteres', 'devolverCapital', 'crearDeuda', 'pagarCuota',
-  'configurarTarjeta','guardarTarjeta','eliminarTarjeta','repararTelegram', 'guardarObjetivos', 'guardarCategoria', 'guardarNaturaleza', 'guardarMetaAhorro', 'eliminarMetaAhorro', 'moverMetaAhorro', 'eliminarCategoria', 'guardarSubcategoria', 'eliminarSubcategoria', 'guardarWatchlist', 'registrarDividido', 'registrarDivision', 'eliminarDivision', 'importarDesdeLocal'];
+  'configurarTarjeta','guardarTarjeta','eliminarTarjeta','repararTelegram', 'guardarObjetivos', 'guardarCategoria', 'guardarNaturaleza', 'guardarMetaAhorro', 'eliminarMetaAhorro', 'moverMetaAhorro', 'eliminarCategoria', 'guardarSubcategoria', 'eliminarSubcategoria', 'guardarWatchlist', 'registrarDividido', 'registrarDivision', 'eliminarDivision', 'importarDesdeLocal', 'convertirParaOtro'];
 var API_ADMIN_ = ['enviarReporte', 'estadoSistema', 'importarDesdeLocal', 'guardarClaveIA', 'guardarTelegram'];
 
 /**
@@ -4589,7 +4593,7 @@ function ejecutarAccionesIA_(acciones) {
       // categoría: la que eligió la IA (si existe en tu lista) o, si no, tus reglas guardadas
       let cat = categoriaCanon_(a.categoria, gasto), sub = cat ? subcategoriaCanon_(cat, a.subcategoria, gasto) : '';
       if (!cat) { const auto = autoCategorizar_(desc); cat = auto.categoria || ''; sub = auto.subcategoria || ''; }
-      const r = registrarOProgramar_({ tipo: tipo, monto: monto, moneda: moneda, descripcion: desc, medio: medio || (tj ? 'Tarjeta' : ''), tarjetaId: tj ? tj.id : undefined, cuentaId: cuenta ? cuenta.id : undefined, fecha: a.fecha || null, categoria: cat, subcategoria: sub });
+      const r = registrarOProgramar_({ tipo: tipo, monto: monto, moneda: moneda, descripcion: desc, medio: medio || (tj ? 'Tarjeta' : ''), tarjetaId: tj ? tj.id : undefined, cuentaId: cuenta ? cuenta.id : undefined, fecha: a.fecha || null, categoria: cat, subcategoria: sub, notas: a.notas || undefined });
       deshacer.push({ k: r.programado ? 'prog' : 'mov', id: r.programado ? r.id : r.idMov });
       const medioTxt = gasto ? ' · ' + (tj ? 'tarjeta ' + escaparMd_(tj.banco) : (cuenta ? escaparMd_(cuenta.banco) : (medio === 'Efectivo' ? 'efectivo' : (medio === 'Debito' ? 'débito' : (medio === 'Tarjeta' ? 'tarjeta' : medioGastoPorDefecto_(moneda).toLowerCase()))))) : (cuenta ? ' · ' + escaparMd_(cuenta.banco) : '');
       let linea = (r.programado ? '📅 Programado' : '✅ Registrado') + ': ' + (gasto ? 'gasto' : 'ingreso') + ' de ' + formatoMonto_(monto, moneda) +
@@ -4674,7 +4678,19 @@ function procesarMensajeLibreTelegram_(texto) {
   }
   borrarPendienteTg_();
 
-  const r = ejecutarAccionesIA_(acciones);
+  // si ya se registró solo desde tu correo, no lo duplica: te pregunta
+  const nuevas = [];
+  acciones.forEach(function (a) {
+    let dup = null;
+    try { if (a.accion === 'registrar' && Number(a.monto) > 0) dup = posibleDuplicado_(Number(a.monto), a.moneda || 'PEN', a.fecha ? fecha_(a.fecha) : new Date(), a.tipo === 'gasto', true); } catch (e) { dup = null; }
+    if (!dup) { nuevas.push(a); return; }
+    const k = guardarAccionPendiente_(a);
+    enviarMensajeTelegram('📧 Eso ya lo registré desde tu correo: "' + escaparMd_(dup.descripcion) + '" del ' + fechaISO_(dup.fecha) + ' por ' + formatoMonto_(Number(a.monto), a.moneda || 'PEN') + '. ¿Es el mismo?',
+      [[{ text: '✅ Es el mismo', data: 'pend:no:' + k }, { text: '➕ Registrar aparte', data: 'pend:si:' + k }]]);
+  });
+  if (!nuevas.length) return;
+
+  const r = ejecutarAccionesIA_(nuevas);
   const lote = r.deshacer.length ? guardarDeshacer_(r.deshacer) : '';
   enviarMensajeTelegram(r.lineas.join('\n') + aviso, lote ? [[{ text: '↩️ Deshacer', data: 'undo:' + lote }]] : undefined);
   // lo que la IA no pudo clasificar: te lo pregunta con botones
@@ -4699,6 +4715,89 @@ function procesarAudioTelegram_(fileId) {
   if (!texto) return enviarMensajeTelegram('No logré escuchar nada en el audio.');
   enviarMensajeTelegram('🎙 Entendí: _' + escaparMd_(texto) + '_');
   procesarMensajeLibreTelegram_(texto);
+}
+
+/** Foto de un recibo, boleta, voucher o captura de Yape/transferencia → la IA la lee y sigue el mismo camino que un mensaje */
+function procesarFotoTelegram_(fileId, caption) {
+  if (!prop_('GEMINI_API_KEY')) {
+    return enviarMensajeTelegram('Para leer fotos de recibos agrega tu clave de Gemini (Más → Inteligencia artificial en la app, o GEMINI_API_KEY en las propiedades del script).');
+  }
+  const info = JSON.parse(UrlFetchApp.fetch('https://api.telegram.org/bot' + tgToken_() + '/getFile?file_id=' + encodeURIComponent(fileId), { muteHttpExceptions: true }).getContentText());
+  if (!info.ok) throw new Error('No pude descargar la foto.');
+  const blob = UrlFetchApp.fetch('https://api.telegram.org/file/bot' + tgToken_() + '/' + info.result.file_path).getBlob();
+  const texto = leerReciboFoto_(blob, caption);
+  if (!texto || /^NO_ES_RECIBO/i.test(texto)) return enviarMensajeTelegram('🧾 No encontré un pago en esa imagen. Mándame la foto del recibo, boleta o captura del Yape/transferencia' + (caption ? '' : ', o escríbeme el gasto') + '.');
+  enviarMensajeTelegram('🧾 Leí: _' + escaparMd_(texto) + '_');
+  procesarMensajeLibreTelegram_(texto);
+}
+
+/** Devuelve una frase como si la escribiera el usuario ("gasté 45.90 soles en Plaza Vea con tarjeta BCP el 2026-11-11 ...") */
+function leerReciboFoto_(blob, caption) {
+  let mime = blob.getContentType() || 'image/jpeg';
+  if (mime.indexOf('image/') !== 0) mime = 'image/jpeg';
+  const system = 'Lees fotos de recibos, boletas, facturas, vouchers de tarjeta y capturas de Yape, Plin o transferencias de un usuario en Perú. ' +
+    'Responde SOLO una frase en español, en primera persona, como si el usuario te contara el movimiento, con: si fue gasto o ingreso, el TOTAL pagado (no subtotales ni IGV), ' +
+    'la moneda (S/ = soles), el comercio o la persona, la fecha que aparece (AAAA-MM-DD), y el medio de pago si se ve (tarjeta y banco, efectivo, Yape...). ' +
+    'Ejemplo: "Gasté 45.90 soles en Plaza Vea el 2026-11-10 con tarjeta de crédito BCP; compré abarrotes". ' +
+    'Si la imagen no es un pago o no se lee el total, responde exactamente NO_ES_RECIBO.';
+  const partes = [{ text: 'Lee este comprobante.' + (caption ? ' El usuario añadió: "' + caption + '"' : '') }, { inline_data: { mime_type: mime, data: Utilities.base64Encode(blob.getBytes()) } }];
+  let t = String(llamarGemini_(system, partes, 400) || '').trim();
+  if (caption && !/^NO_ES_RECIBO/i.test(t)) t += '. ' + caption;
+  return t;
+}
+
+/** ¿Ya hay un movimiento con el mismo monto y moneda, ±2 días? Devuelve el movimiento o null */
+function posibleDuplicado_(monto, moneda, fecha, esGastoTipo, soloDeCorreo) {
+  const f = fecha || new Date();
+  const lista = leerMovimientos_();
+  for (let i = lista.length - 1; i >= 0 && i >= lista.length - 400; i--) {
+    const m = lista[i];
+    if (String(m.moneda) !== String(moneda) || Math.abs(Number(m.monto) - monto) > 0.009) continue;
+    if (esGastoTipo ? !esGasto_(m.tipo) : !esIngreso_(m.tipo)) continue;
+    const mf = m.fecha instanceof Date ? m.fecha : fecha_(m.fecha);
+    if (!mf || Math.abs(mf - f) > 2.5 * 86400000) continue;
+    if (soloDeCorreo && !/Desde correo/.test(String(m.notas))) continue;
+    return { id: m.id, descripcion: m.descripcion || m.categoria || '', fecha: mf };
+  }
+  // también contra consumos de tarjeta (no siempre generan movimiento el mismo día)
+  return null;
+}
+
+/** Guarda una acción para confirmarla luego con un botón de Telegram (7 días) */
+function guardarAccionPendiente_(a) {
+  const k = Utilities.getUuid().replace(/-/g, '').substring(0, 10);
+  PropertiesService.getScriptProperties().setProperty('PEND_' + k, JSON.stringify({ a: a, t: Date.now() }));
+  return k;
+}
+function tomarAccionPendiente_(k) {
+  const P = PropertiesService.getScriptProperties();
+  const v = P.getProperty('PEND_' + k);
+  if (!v) return null;
+  P.deleteProperty('PEND_' + k);
+  try { return JSON.parse(v).a; } catch (e) { return null; }
+}
+
+/** Botones de categoría para lo que la IA no pudo clasificar */
+function preguntarCategorias_(sinCategoria) {
+  (sinCategoria || []).slice(0, 2).forEach(function (x) {
+    const cats = categoriasFrecuentes_(x.gasto, 8);
+    if (!cats.length) return;
+    const filas = [], orden = categoriasOrdenadas_(x.gasto);
+    cats.forEach(function (c, i) { if (i % 2 === 0) filas.push([]); filas[filas.length - 1].push({ text: c, data: 'cat:' + x.id + ':' + (x.gasto ? 'g' : 'i') + ':' + orden.indexOf(c) }); });
+    enviarMensajeTelegram('🏷️ No supe en qué categoría poner ese ' + (x.gasto ? 'gasto' : 'ingreso') + '. ¿Cuál es?', filas);
+  });
+}
+
+/** Botón de Telegram: pend:si:<k> registra la acción guardada; pend:no:<k> la descarta */
+function resolverPendienteTelegram_(cb, si, k) {
+  const a = tomarAccionPendiente_(k);
+  if (!a) { responderCallbackTelegram_(cb.id, 'Ya estaba resuelto'); return; }
+  if (!si) { responderCallbackTelegram_(cb.id, 'Listo, no lo dupliqué'); enviarMensajeTelegram('👍 Perfecto, no lo registré de nuevo.'); return; }
+  const r = ejecutarAccionesIA_([a]);
+  const lote = r.deshacer.length ? guardarDeshacer_(r.deshacer) : '';
+  responderCallbackTelegram_(cb.id, 'Registrado');
+  enviarMensajeTelegram(r.lineas.join('\n'), lote ? [[{ text: '↩️ Deshacer', data: 'undo:' + lote }]] : undefined);
+  preguntarCategorias_(r.sinCategoria);
 }
 
 /** Pila de lotes deshacibles (los últimos 15). Cada lote = lo que se registró con un solo mensaje. */
@@ -6033,6 +6132,39 @@ function api_compraParaOtro(a) {
   const cuentaId = a.cuentaId !== undefined && a.cuentaId !== '' ? a.cuentaId : cuentaPorDefecto_(moneda, medio === 'Efectivo' ? 'Efectivo' : 'Debito');
   const id = registrarPrestamoOtorgado({ deudor: persona, moneda: moneda, montoPrestado: monto, tasaInteres: 0, plazoMeses: 1, fechaInicio: a.fecha, concepto: desc, cuentaOrigenId: cuentaId });
   return { persona: persona, modo: modo, prestamoId: id };
+}
+
+/**
+ * Un gasto YA registrado resultó ser para otra persona. args = { id, persona, modo: 'devuelve'|'regalo' }
+ *  - devuelve: deja de ser gasto tuyo y pasa a "por cobrar" en Préstamos y deudas (la plata que salió de tu cuenta es la misma).
+ *  - regalo: sigue siendo gasto tuyo, con la nota "Regalo para X".
+ */
+function api_convertirParaOtro(a) {
+  const persona = String(a.persona || '').trim();
+  if (!persona) throw new Error('Escribe para quién fue.');
+  const m = movimientoPorId_(a.id);
+  if (!esGasto_(m.tipo)) throw new Error('Solo un gasto puede ser para otra persona.');
+  if (RE_DIVIDIDO_.test(m.notas)) throw new Error('Este gasto está dividido: primero deshaz la división.');
+  if (/Compra para |Regalo para /.test(String(m.notas))) throw new Error('Este gasto ya está marcado para otra persona.');
+  const clase = clasificarMovimiento_(m);
+  if (clase !== 'normal' && clase !== 'tarjeta') throw new Error('Este movimiento no se puede cambiar así.');
+  if (/Cuotas #\w+ \(\d+\/\d+\)/.test(m.notas)) throw new Error('Un gasto en cuotas no se puede pasar a otra persona.');
+  const nombre = canonPersona_(persona);
+  if (a.modo === 'regalo') {
+    editarMovimiento(m.id, { notas: (m.notas ? m.notas + ' · ' : '') + 'Regalo para ' + nombre });
+    return { persona: nombre, modo: 'regalo' };
+  }
+  // devuelve: se reemplaza el gasto por la compra para la persona (mismo dinero, misma cuenta y fecha)
+  const datos = { tipo: m.tipo, monto: m.monto, moneda: m.moneda, descripcion: m.descripcion, medio: clase === 'tarjeta' ? 'Tarjeta' : (m.medio || ''), cuentaId: m.cuentaId,
+    fecha: m.fecha, categoria: m.categoria, subcategoria: m.subcategoria, persona: nombre, modo: 'devuelve' };
+  if (clase === 'tarjeta') {
+    // en tarjeta el consumo se queda (lo cobra el banco) y se suma lo que la persona te debe, igual que al registrar con tarjeta «para otra persona»
+    const id = registrarPrestamoOtorgado({ deudor: nombre, moneda: m.moneda, montoPrestado: m.monto, tasaInteres: 0, plazoMeses: 1, fechaInicio: m.fecha, concepto: m.descripcion || 'Compra', cuentaOrigenId: '' });
+    editarMovimiento(m.id, { notas: (m.notas ? m.notas + ' · ' : '') + 'Compra para ' + nombre });
+    return { persona: nombre, modo: 'devuelve', prestamoId: id };
+  }
+  eliminarMovimiento(m.id);
+  return api_compraParaOtro(datos);
 }
 
 /** Me pagó (total o parcial): se aplica a sus deudas más antiguas de esa moneda y entra a una cuenta */
@@ -7575,4 +7707,135 @@ function api_guardarTelegram(a) {
   registrarLog_('Telegram', 'Webhook conectado desde la app');
   return true;
 }
+
+/* ==== 33_Correo.gs ==== */
+/**
+ * ============================================================
+ * LECTURA AUTOMÁTICA DE TU GMAIL (alertas de los bancos)
+ * ============================================================
+ * Cada 15 minutos revisa los correos de alertas de tus bancos (consumos, Yape, transferencias),
+ * la IA saca monto, comercio, cuenta y categoría, y:
+ *   - si no parece repetido → lo registra solo y te avisa por Telegram (con ↩️ Deshacer);
+ *   - si parece que ya lo registraste (por Telegram o a mano) → NO lo registra y te pregunta.
+ * Nunca toca correos de BBVA ni de Banca di Asti (no son tus cuentas).
+ * Solo lee: no borra ni responde correos. Marca los procesados con la etiqueta "Finanzas/Procesado".
+ *
+ * Activar una vez: ejecuta activarLecturaCorreo() desde el editor (Google pedirá permiso para leer Gmail).
+ * Desactivar: desactivarLecturaCorreo().
+ */
+
+var CORREO_REMITENTES_ = ['notificacionesbcp.com.pe', 'yape.pe', 'interbank.pe', 'netinterbank.com.pe', 'intercorp.com.pe',
+  'scotiabank.com.pe', 'bancofalabella.pe', 'bancoripley.com.pe', 'plin.pe', 'revolut.com', 'tunki.com.pe', 'mibanco.com.pe', 'pichincha.pe'];
+/** Bancos que NO son del usuario: se ignoran siempre (BBVA = dinero de su hermano; Banca di Asti = cuentas familiares en Italia) */
+var CORREO_EXCLUIR_ = /bbva|banca\s*di\s*asti|bancadiasti|banco\s*di\s*asti|cr\s*asti/i;
+/** Correos de los bancos que no son movimientos */
+var CORREO_RUIDO_ = /c[oó]digo de verificaci|clave|contraseña|encuesta|opini[oó]n|bienvenid|t[eé]rminos|promoci|cr[eé]dito listo|activaci[oó]n|activ[oó]|solicitud|estado de cuenta|extracto|ventajas|recibe eur|te quedan|reorganizaci|configuraci[oó]n|l[ií]mite|actualiza tus datos|seguridad|newsletter|beneficio/i;
+var CORREO_ETIQUETA_ = 'Finanzas/Procesado';
+
+function activarLecturaCorreo() {
+  desactivarLecturaCorreo();
+  GmailApp.getInboxUnreadCount(); // fuerza el permiso de Gmail
+  if (!GmailApp.getUserLabelByName(CORREO_ETIQUETA_)) GmailApp.createLabel(CORREO_ETIQUETA_);
+  PropertiesService.getScriptProperties().setProperty('CORREO_DESDE', String(Date.now()));
+  ScriptApp.newTrigger('revisarCorreosBancarios').timeBased().everyMinutes(15).create();
+  registrarLog_('Correo', 'Lectura automática de Gmail activada');
+  return 'Listo: desde ahora reviso tus alertas bancarias cada 15 minutos.';
+}
+
+function desactivarLecturaCorreo() {
+  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'revisarCorreosBancarios') ScriptApp.deleteTrigger(t); });
+}
+
+function api_estadoCorreo() {
+  const activo = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'revisarCorreosBancarios'; });
+  return { activo: activo, desde: Number(prop_('CORREO_DESDE') || 0) };
+}
+
+function correoYaProcesado_(id) {
+  const l = String(prop_('CORREO_HECHOS') || '').split(',');
+  return l.indexOf(id) !== -1;
+}
+function marcarCorreoProcesado_(id) {
+  const l = String(prop_('CORREO_HECHOS') || '').split(',').filter(Boolean);
+  l.push(id);
+  PropertiesService.getScriptProperties().setProperty('CORREO_HECHOS', l.slice(-400).join(','));
+}
+
+/** Lo que corre cada 15 minutos */
+function revisarCorreosBancarios() {
+  if (!iaProveedor_()) return;
+  const desde = Number(prop_('CORREO_DESDE') || 0);
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return;
+  try {
+    const etiqueta = GmailApp.getUserLabelByName(CORREO_ETIQUETA_) || GmailApp.createLabel(CORREO_ETIQUETA_);
+    const q = 'from:(' + CORREO_REMITENTES_.join(' OR ') + ') newer_than:3d -label:' + CORREO_ETIQUETA_.replace('/', '-');
+    const hilos = GmailApp.search(q, 0, 15);
+    let usadas = 0;
+    hilos.forEach(function (h) {
+      h.getMessages().forEach(function (m) {
+        const id = m.getId();
+        if (correoYaProcesado_(id) || m.getDate().getTime() < desde || usadas >= 8) return;
+        try { if (procesarCorreoBancario_(m)) usadas++; }
+        catch (e) { registrarLog_('ERROR Correo', m.getSubject() + ': ' + e.message); }
+        marcarCorreoProcesado_(id);
+      });
+      if (h.getMessages().every(function (m) { return correoYaProcesado_(m.getId()); })) h.addLabel(etiqueta);
+    });
+  } finally { lock.releaseLock(); }
+}
+
+/** Limpia el cuerpo: quita líneas legales y espacios para que la IA lea solo lo importante */
+function textoCorreo_(m) {
+  const t = String(m.getPlainBody() || '').replace(/\r/g, '').split('\n').map(function (x) { return x.trim(); }).filter(function (x) {
+    return x && !/^(descargar| )$/i.test(x) && !/nunca te solicitar|por tu seguridad|comun[ií]cate|si no reconoces|no respondas|políticas|privacidad|desuscrib|copyright/i.test(x);
+  });
+  return t.join('\n').substring(0, 1800);
+}
+
+/** Devuelve true si gastó IA en este correo */
+function procesarCorreoBancario_(m) {
+  const de = m.getFrom(), asunto = m.getSubject(), cuerpo = textoCorreo_(m);
+  if (CORREO_EXCLUIR_.test(de + ' ' + asunto) || CORREO_EXCLUIR_.test(cuerpo.substring(0, 600))) return false;
+  if (CORREO_RUIDO_.test(asunto) && !/consumo|pago|yape|transferencia|constancia|operaci/i.test(asunto)) return false;
+
+  const j = interpretarCorreoIA_(de, asunto, cuerpo, m.getDate());
+  if (!j || j.ignorar || !Array.isArray(j.acciones) || !j.acciones.length) {
+    if (j && j.propia) enviarMensajeTelegram('📧 Vi un movimiento entre tus propias cuentas (' + escaparMd_(asunto) + '). No lo registré: si quieres anotarlo, usa Traspaso en la app.');
+    return true;
+  }
+  const banco = escaparMd_(String(de).replace(/<.*>/, '').trim() || 'tu banco');
+  j.acciones.slice(0, 3).forEach(function (a) {
+    if (a.accion !== 'registrar' || !(Number(a.monto) > 0) || (a.tipo !== 'gasto' && a.tipo !== 'ingreso')) return;
+    a.notas = 'Desde correo · ' + asunto.substring(0, 60);
+    const dup = posibleDuplicado_(Number(a.monto), a.moneda || 'PEN', a.fecha ? fecha_(a.fecha) : m.getDate(), a.tipo === 'gasto');
+    if (dup) {
+      const k = guardarAccionPendiente_(a);
+      enviarMensajeTelegram('📧 *' + banco + '*: ' + (a.tipo === 'gasto' ? 'gasto' : 'ingreso') + ' de ' + formatoMonto_(Number(a.monto), a.moneda || 'PEN') + ' — "' + escaparMd_(a.descripcion || '') + '"\n' +
+        'Parece que ya lo tienes: "' + escaparMd_(dup.descripcion) + '" del ' + fechaISO_(dup.fecha) + '. ¿Es el mismo?',
+        [[{ text: '✅ Es el mismo', data: 'pend:no:' + k }, { text: '➕ Registrar aparte', data: 'pend:si:' + k }]]);
+      return;
+    }
+    const r = ejecutarAccionesIA_([a]);
+    const lote = r.deshacer.length ? guardarDeshacer_(r.deshacer) : '';
+    enviarMensajeTelegram('📧 Desde tu correo (' + banco + '):\n' + r.lineas.join('\n'), lote ? [[{ text: '↩️ Deshacer', data: 'undo:' + lote }]] : undefined);
+    preguntarCategorias_(r.sinCategoria);
+  });
+  return true;
+}
+
+function interpretarCorreoIA_(de, asunto, cuerpo, fechaCorreo) {
+  const extra = '\n\nESTE MENSAJE NO LO ESCRIBIÓ EL USUARIO: es una notificación automática de su banco que llegó a su correo el ' +
+    Utilities.formatDate(fechaCorreo, zona_(), "yyyy-MM-dd'T'HH:mm") + '. Reglas extra:\n' +
+    '- Nunca preguntes nada: "pregunta" siempre null. Si no es un movimiento de dinero ya realizado (publicidad, aviso, código, solicitud), devuelve acciones vacías.\n' +
+    '- Usa la fecha y hora de la operación que dice el correo (o la del correo).\n' +
+    '- "Realizaste un consumo con tu Tarjeta de Crédito X" → gasto, medio tarjeta, tarjeta = X. "Tarjeta de Débito X" → gasto, medio debito, cuenta = X.\n' +
+    '- "Recepción de Yapeo/Plin/transferencia recibida" → ingreso a la cuenta del banco que envía el correo (Yape es del BCP). "Pago exitoso" de Yape o "yapeo enviado" → gasto, cuenta BCP.\n' +
+    '- descripcion: el comercio o la persona, corto y legible (ej. "Mercado Pago", "Yape de Juan Pérez"), sin números de operación.\n' +
+    '- Si el destinatario o el que envía es el propio usuario (Piero Gallo) o es "pago de tarjeta de crédito propia", es un movimiento entre sus cuentas: devuelve acciones vacías y agrega "propia": true.\n' +
+    '- Elige categoría y subcategoría de su lista según el comercio.';
+  const texto = 'Remitente: ' + de + '\nAsunto: ' + asunto + '\n' + cuerpo + extra;
+  return interpretarMensajeIA_(texto, null);
+}
+
 

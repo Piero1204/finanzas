@@ -18,7 +18,7 @@
 <script src="jspdf.umd.min.js"></script>
 <script src="jspdf.plugin.autotable.min.js"></script>
 <script>(function(){
-window.LOCAL_MODE=true;window.APP_VER='20261111-1237';
+window.LOCAL_MODE=true;window.APP_VER='20261111-1353';
 let w=null,n=0;const pend={};
 try{
   w=new Worker('worker.js?v='+window.APP_VER);
@@ -1010,13 +1010,15 @@ async function detalleMov(id){
     if(m.division){const dv=m.division;h+='<div class="card" style="background:var(--card);padding:12px 14px;margin:10px 0"><b style="color:var(--tx)">Gasto dividido</b><div class="bn" style="margin:4px 0 6px">Pagaste '+fm(dv.total,m.moneda)+' en total · tu parte '+fm(dv.yo,m.moneda)+'</div>'+dv.personas.map(p=>'<div class="row2"><div class="mid"><b>'+esc(p.nombre)+'</b><small>'+(p.estado==='Pagado'?'Ya te pagó':p.saldo<p.monto?'Aún falta cobrar '+fm(p.saldo,m.moneda):'Te debe')+'</small></div><div class="amt">'+fm(p.monto,m.moneda)+'</div></div>').join('')+'<button class="btn sec" id="dmDX" style="margin-top:10px">Deshacer división</button></div>'}
     h+='<div style="margin-top:8px">'+filas.map(f=>'<div class="row2"><div class="mid mut">'+f[0]+'</div><div class="amt" style="font-weight:600;max-width:60%">'+esc(f[1])+'</div></div>').join('')+'</div>';
     const dividible=!m.division&&!ing&&!tr&&(m.clase==='normal'||m.clase==='tarjeta')&&!m.programado&&!m.cuotas&&!(m.tarjeta&&m.tarjeta.estado==='Pagado');
-    if(dividible)h+='<button class="btn sec" id="dmD" style="margin-top:12px">'+ic('users')+' Dividir gasto</button>';
+    const paraOtro=/Compra para |Regalo para /.test(String(m.notas||''));
+    if(dividible)h+='<div class="two" style="margin-top:12px"><button class="btn sec" id="dmD" style="margin:0">'+ic('users')+' Dividir gasto</button>'+(paraOtro?'':'<button class="btn sec" id="dmO" style="margin:0">'+ic('user-plus')+' Fue para otra persona</button>')+'</div>';
     if(m.categoria&&!tr)h+='<button class="btn sec" id="dmC" style="margin-top:12px">'+ic('tags')+' Ver todo en «'+esc(m.categoria)+'»</button>';
     h+='<div class="btns">'+(m.editable?'<button class="btn sec" id="dmE">'+ic('pencil')+' Editar</button>':'')+(m.eliminable?'<button class="btn danger" id="dmX">'+ic('trash-2')+' Eliminar</button>':'')+'</div>';
     b.innerHTML=h;icons();
     bind('dmC',()=>sCategoria(m.categoria,ing?'Ingreso':'Gasto'));
     bind('dmE',()=>formEditarMov(m));
     bind('dmD',()=>formDividir(m));
+    bind('dmO',()=>formParaOtro(m));
     bind('dmDX',e=>{if(!confirm('Se quitarán las deudas de '+m.division.personas.map(p=>p.nombre).join(', ')+' y el gasto vuelve a ser de '+fm(m.division.total,m.moneda)+'. ¿Continuar?'))return;hacer(e.currentTarget,()=>api('eliminarDivision',{token:tok(),id:m.id}),'División deshecha').then(()=>{if(S.tab==='movs')cargarMovs(true);detalleMov(m.id)}).catch(()=>{})});
     bind('dmX',e=>{if(!confirm(m.division?'Este gasto está dividido. Se eliminará también lo que te deben '+m.division.personas.map(p=>p.nombre).join(', ')+'. ¿Continuar?':'¿Eliminar este movimiento? Se revertirá su efecto en el saldo.'))return;hacer(e.currentTarget,()=>api('eliminarMovimiento',{token:tok(),id:m.id}),'Eliminado').then(()=>{cerrarSheet();if(S.tab==='movs')cargarMovs(true)}).catch(()=>{})});
   }catch(e){if(e.message!=='auth'){b.innerHTML='<div class="empty">'+esc(e.message)+'</div>'}}
@@ -1828,6 +1830,20 @@ function repartoUI(boxId,linkId,moneda,idMonto,idCuenta){
     return (prin>0?[{monto:prin,cuentaId:val(idCuenta)}]:[]).concat(otras)
   }}
 }
+async function formParaOtro(m){
+  const T=tok();let modo='devuelve';
+  const b=abrirSheet('¿Para quién fue?','<div class="sk"></div>');
+  let personas=[];try{personas=await conTiempo(api('personas',{}),8000,'x')}catch(e){}
+  b.innerHTML='<div class="note">Gasto de <b style="color:var(--tx)">'+fm(m.monto,m.moneda)+'</b> — '+esc(m.descripcion||m.categoria||'')+'.</div><label>Persona</label><select id="poP">'+personas.map(x=>'<option value="'+esc(x.nombre)+'">'+esc(x.nombre)+'</option>').join('')+'<option value="__nuevo">Otra persona…</option></select><div id="poNB" class="hide"><input id="poN" placeholder="Nombre" autocomplete="off" style="margin-top:8px"></div>'
+    +'<label>¿Te lo devuelve?</label>'+segHtml('poM',[['devuelve','Me lo devuelve'],['regalo','Es un regalo']],modo)+'<div class="note" id="poT"></div>'
+    +'<div class="btns"><button class="btn sec" id="poB">Volver</button><button class="btn" id="poOk">Guardar</button></div>';
+  const sel=$('#poP');if(!personas.length)sel.value='__nuevo';
+  const f=()=>{$('#poNB').classList.toggle('hide',sel.value!=='__nuevo');$('#poT').textContent=modo==='devuelve'?'Deja de contar como gasto tuyo y queda "por cobrar" en Préstamos y deudas.':'Sigue siendo gasto tuyo, con la nota "Regalo para …".'};
+  sel.onchange=f;segBind('poM',v=>{modo=v;f()});f();
+  bind('poB',()=>detalleMov(m.id));
+  bind('poOk',e=>{const persona=sel.value==='__nuevo'?val('poN').trim():sel.value;if(!persona){toast('Escribe el nombre.',true);return}
+    hacer(e.currentTarget,()=>api('convertirParaOtro',{token:T,id:m.id,persona,modo}),modo==='devuelve'?persona+' te debe '+fm(m.monto,m.moneda)+' ✓':'Marcado como regalo ✓').then(()=>{cerrarSheet();if(S.tab==='movs')cargarMovs(true)}).catch(()=>{})});
+}
 function formCobroPersona(nombre,moneda,total){
   const T=tok();
   abrirSheet('Cobro a '+nombre,'<div class="note">Te debe <b style="color:var(--tx)">'+fm(total,moneda)+'</b>. Se aplica primero a lo más antiguo.</div><label>¿Cuánto te pagó?</label><input id="cbM" inputmode="decimal" value="'+total+'" style="font-size:24px;font-weight:800"><label>Llega a</label><select id="cbC">'+cuentaOpts(cuentasPor(moneda),'')+'</select><div id="cbR"></div><button type="button" id="cbRL" style="background:none;border:0;padding:10px 0;font:inherit;font-size:14px;color:var(--ac);cursor:pointer;-webkit-tap-highlight-color:transparent">+ Me pagó en varias cuentas</button><label>Fecha</label><input id="cbF" type="date" value="'+hoyISO()+'"><div class="btns"><button class="btn sec" id="cbB">Volver</button><button class="btn" id="cbOk">Registrar cobro</button></div>');
@@ -2093,7 +2109,7 @@ async function avisarAlAbrir(forzar){
 }
 
 /* ================= escrituras: también se envían a tu hoja (modo hoja) ================= */
-const ESCRIBE=/^(registrar|editar|eliminar|guardar|crear|cobrar|pagar|traspaso|cambioDivisa|ajustar|operacion|realizar|cancelar|asignar|compra|mover|devolver|cerrar|renombrar|configurar)/;
+const ESCRIBE=/^(registrar|editar|eliminar|guardar|crear|cobrar|pagar|traspaso|cambioDivisa|ajustar|operacion|realizar|cancelar|asignar|compra|mover|devolver|cerrar|renombrar|configurar|convertir)/;
 const api0=api;
 api=function(n,a){return api0(n,a).then(r=>{if(ESCRIBE.test(n))hEncolar(n,a);return r})};
 function cuandoTxt(k){const t=Number(localStorage.getItem(k)||0);return t?new Date(t).toLocaleString('es-PE',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'nunca'}
