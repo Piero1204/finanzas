@@ -18,7 +18,7 @@
 <script src="jspdf.umd.min.js"></script>
 <script src="jspdf.plugin.autotable.min.js"></script>
 <script>(function(){
-window.LOCAL_MODE=true;window.APP_VER='20261110-1205';
+window.LOCAL_MODE=true;window.APP_VER='20261111-1110';
 let w=null,n=0;const pend={};
 try{
   w=new Worker('worker.js?v='+window.APP_VER);
@@ -2166,7 +2166,7 @@ function sHoja(){
   const paso=(n,t)=>'<div style="display:flex;gap:10px;margin:10px 0"><div style="flex:0 0 26px;height:26px;border-radius:50%;background:var(--ac);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px">'+n+'</div><div style="flex:1;font-size:14px;line-height:1.45">'+t+'</div></div>';
   abrirSheet('Conectar con mi hoja','<div class="note">Guarda tus datos en <b>tu propia hoja de Google</b>: los ves desde cualquier dispositivo y, si quieres, también registras por Telegram. La hoja es tuya: nadie más tiene acceso.</div>'
     +'<div class="bn" style="margin:12px 0 2px">Ya tengo mi enlace</div>'
-    +'<input id="hU" type="url" placeholder="Pega aquí tu enlace (https://script.google.com/…)" autocapitalize="off" autocorrect="off" spellcheck="false"><button class="btn" id="hCon">Conectar</button>'
+    +'<input id="hU" type="url" placeholder="Pega aquí tu enlace (https://script.google.com/…)" autocapitalize="off" autocorrect="off" spellcheck="false"><input id="hK" type="password" placeholder="Clave o PIN de tu hoja (solo si ya la tenías)" autocomplete="off" style="margin-top:8px"><button class="btn" id="hCon">Conectar</button>'
     +'<div class="bn" style="margin:18px 0 2px">Primera vez: crear mi hoja (unos 5 minutos)</div>'
     +paso(1,'Crea una hoja nueva de Google. <button class="chip" id="hSh">Abrir hoja nueva</button>')
     +paso(2,'En esa hoja entra a <b>Extensiones → Apps Script</b> y borra el código que aparezca.')
@@ -2186,7 +2186,7 @@ function sHoja(){
     b.disabled=false
   });
   bind('hCon',async e=>{
-    const raw=val('hU').trim(),partes=raw.split('#'),u=partes[0],k=(partes[1]||clave).trim();
+    const raw=val('hU').trim(),partes=raw.split('#'),u=partes[0],k=(partes[1]||val('hK')||clave).trim();
     if(u.indexOf('https://script.google.com/')!==0){toast('El enlace debe empezar con https://script.google.com/',true);return}
     if(!/\/exec$/.test(u)){toast('El enlace debe terminar en /exec (es la URL de «Aplicación web»).',true);return}
     const b=e.currentTarget;b.disabled=true;b.textContent='Conectando…';
@@ -2210,7 +2210,7 @@ function sHoja(){
       await hTraer(true);
       localStorage.removeItem('hClaveGen');
       pintarTabs();cerrarSheet();toast(subir?'Datos subidos y conectada ✓':'Conectada ✓');cargar(true)
-    }catch(x){limpiar();toast(x.message,true);b.disabled=false;b.textContent='Conectar'}
+    }catch(x){limpiar();toast(/PIN incorrecto|token/i.test(x.message)?'La clave no coincide con la de tu hoja. Si tu hoja ya existía, escribe su PIN en «Clave o PIN de tu hoja».':x.message,true);b.disabled=false;b.textContent='Conectar'}
   });
 }
 function sHojaOn(){
