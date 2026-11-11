@@ -18,7 +18,7 @@
 <script src="jspdf.umd.min.js"></script>
 <script src="jspdf.plugin.autotable.min.js"></script>
 <script>(function(){
-window.LOCAL_MODE=true;window.APP_VER='20261111-1133';
+window.LOCAL_MODE=true;window.APP_VER='20261111-1237';
 let w=null,n=0;const pend={};
 try{
   w=new Worker('worker.js?v='+window.APP_VER);
@@ -822,9 +822,9 @@ function formMov(modo,pre){
     +'<div class="two"><div><label>Categoría</label><select id="mCat">'+catOpts(clase==='ingreso'?'Ingreso':'Gasto','')+'</select></div><div><label>Subcategoría</label><select id="mSub">'+subOpts('Gasto','','')+'</select></div></div>'
     +'<div id="boxTipo"></div><div id="boxProy"></div>'
     +'<label>Fecha y hora</label><input id="mFecha" type="datetime-local" value="'+ahoraLocal()+'">'
-    +'<div id="boxOtroLink" style="margin-top:10px"><a id="mOtroL" class="mut" style="font-size:13px;cursor:pointer">+ Es para otra persona</a></div><div id="boxOtro" class="hide"></div>'
-    +'<div id="boxDivLink" style="margin-top:10px"><a id="mDivL" class="mut" style="font-size:13px;cursor:pointer">+ Dividir gasto</a></div><div id="boxDiv" class="hide"></div>'
-    +'<div style="margin-top:6px">'+sw('mProg','Programar (aún no ocurre)',modo==='programar')+'</div>'
+    +'<div id="boxOtroLink" style="margin-top:4px"><button type="button" id="mOtroL" style="background:none;border:0;padding:10px 0;font:inherit;font-size:14px;color:var(--ac);cursor:pointer;-webkit-tap-highlight-color:transparent">+ Es para otra persona</button></div><div id="boxOtro" class="hide"></div>'
+    +'<div id="boxDivLink" style="margin-top:0"><button type="button" id="mDivL" style="background:none;border:0;padding:10px 0;font:inherit;font-size:14px;color:var(--ac);cursor:pointer;-webkit-tap-highlight-color:transparent">+ Dividir gasto</button></div><div id="boxDiv" class="hide"></div>'
+    +'<div style="margin-top:6px">'+sw('mProg','Programar (aún no ocurre)',modo==='programar')+'</div>'+'<div id="boxRec" class="'+(modo==='gasto'?'':'hide')+'" style="margin-top:6px">'+sw('mRec','Se repite cada mes (suscripción, servicio…)',false)+'<div class="bn hide" id="recNota"></div></div>'
     +'<div id="boxAlertas" class="hide"><label>Avisarme por Telegram</label>'+alertChips('mAl',aj.alertasDefault||[1440])+'</div>'
     +'<button class="btn" id="mOk">'+(clase==='gasto'?'Guardar gasto':'Guardar ingreso')+'</button>');
   const medios=()=>clase==='gasto'?[['Tarjeta','Tarjeta'],['Efectivo','Efectivo'],['Debito','Débito']]:[['Efectivo','Efectivo'],['Debito','Débito']];
@@ -890,13 +890,14 @@ function formMov(modo,pre){
   };
   let dividir=null;
   const quitarDiv=()=>{dividir=null;const b=$('#boxDiv');if(b){b.classList.add('hide');b.innerHTML=''}const l=$('#mDivL');if(l)l.textContent='+ Dividir gasto'};
-  $('#mOtroL').onclick=async()=>{otro=!otro;if(otro){quitarDiv();if(!personas){try{personas=await api('personas',{})}catch(e){personas=[]}}}pintarOtro()};
+  $('#mOtroL').onclick=async()=>{otro=!otro;if(otro)quitarDiv();pintarOtro();if(otro&&!personas){try{personas=await conTiempo(api('personas',{}),8000,'x')}catch(e){personas=[]}if(otro)pintarOtro()}};
   $('#mDivL').onclick=async()=>{
     if(dividir){quitarDiv();return}
     if(otro){otro=false;pintarOtro()}
-    if(!personas){try{personas=await api('personas',{})}catch(e){personas=[]}}
     $('#boxDiv').classList.remove('hide');$('#mDivL').textContent='– Quitar "dividir gasto"';
-    dividir=dividirUI($('#boxDiv'),{total:()=>nm(val('mMonto')),moneda:()=>moneda,personas:personas});
+    const cfgD={total:()=>nm(val('mMonto')),moneda:()=>moneda,personas:personas||[]};
+    dividir=dividirUI($('#boxDiv'),cfgD);
+    if(!personas){try{personas=await conTiempo(api('personas',{}),8000,'x')}catch(e){personas=[]}const dl=document.getElementById('dvLista');if(dl&&dividir)dl.innerHTML=personas.map(x=>'<option value="'+esc(x.nombre)+'">').join('')}
   };
   let proyId=pre&&pre.proyecto!==undefined?String(pre.proyecto):'';
   const proy=()=>{
@@ -907,12 +908,14 @@ function formMov(modo,pre){
     bx.innerHTML='<label>'+(inv?'¿Para qué proyecto o negocio es esta inversión?':ing?'¿De qué proyecto o negocio viene? (opcional)':'Proyecto (opcional)')+'</label><select id="mProy">'+proyOpts(proyId,inv?'Aún no lo sé':'Ninguno')+'</select>';
     proyBind('mProy');
   };
-  const progChk=()=>{$('#boxAlertas').classList.toggle('hide',!chk('mProg'));if(chk('mProg')&&otro){otro=false;pintarOtro()}if(chk('mProg'))quitarDiv();$('#boxOtroLink').classList.toggle('hide',clase!=='gasto'||chk('mProg'));$('#boxDivLink').classList.toggle('hide',clase!=='gasto'||chk('mProg'));dyn()};
+  const progChk=()=>{$('#boxAlertas').classList.toggle('hide',!chk('mProg'));{const r=document.getElementById('boxRec');if(r)r.classList.toggle('hide',clase!=='gasto'||chk('mProg'));if(chk('mProg')&&document.getElementById('mRec'))$('#mRec').checked=false;recNota()}if(chk('mProg')&&otro){otro=false;pintarOtro()}if(chk('mProg'))quitarDiv();$('#boxOtroLink').classList.toggle('hide',clase!=='gasto'||chk('mProg'));$('#boxDivLink').classList.toggle('hide',clase!=='gasto'||chk('mProg'));dyn()};
   catLink('mCat','mSub',()=>clase==='ingreso'?'Ingreso':'Gasto');
   if(modo==='programar')segBind('sgClase',v=>{clase=v;medio=medioDef();catReset('mCat','mSub',clase==='ingreso'?'Ingreso':'Gasto');if(clase!=='gasto'&&otro){otro=false;pintarOtro()}if(clase!=='gasto')quitarDiv();$('#boxOtroLink').classList.toggle('hide',clase!=='gasto'||chk('mProg'));$('#boxDivLink').classList.toggle('hide',clase!=='gasto'||chk('mProg'));dyn()});
   segBind('sgMon',v=>{moneda=v;medio=medioDef();dyn();if(dividir)dividir.refrescar()});
   alertBind('mAl');dyn();progChk();
   $('#mMonto').oninput=()=>{preview();notaTj();if(dividir)dividir.refrescar()};
+  function recNota(){const n=document.getElementById('recNota');if(!n)return;const on=chk('mRec');n.classList.toggle('hide',!on);if(on){const f=pd(val('mFecha'))||new Date();n.textContent='Se registra hoy y se repetirá solo el día '+f.getDate()+' de cada mes. Lo ves y lo pausas en Más → Pagos.'}}
+  $('#mRec').onchange=recNota;
   $('#mProg').onchange=progChk;
   $('#mFecha').onchange=()=>{const f=pd(val('mFecha'));if(f&&f>hoyFin()){$('#mProg').checked=true;progChk()}notaTj()};
   if(modo==='programar'){const m=new Date(Date.now()+864e5);const p=n=>String(n).padStart(2,'0');$('#mFecha').value=m.getFullYear()+'-'+p(m.getMonth()+1)+'-'+p(m.getDate())+'T09:00'}
@@ -929,7 +932,10 @@ function formMov(modo,pre){
       if(conCuotas&&Number(cuotas)>1){toast('Un gasto en cuotas no se puede dividir.',true);return}
       try{datos.division=dividir.leer()}catch(x){toast(x.message,true);return}
     }
-    hacer(e.currentTarget,()=>api(nombreOtro?'compraParaOtro':(dividir?'registrarDividido':'registrar'),datos),null).then(r=>{cerrarSheet();if(dividir&&r&&r.personas){toast('Dividido: tu parte '+fm(r.yo,moneda)+' · te deben '+fm(r.total-r.yo,moneda)+' ✓');if(S.tab==='movs')cargarMovs(true);return}toast(nombreOtro?(modoOtro==='devuelve'?'Anotado: '+nombreOtro+' te debe '+fm(Number(String(datos.monto).replace(',','.')),moneda)+' ✓':'Registrado como regalo ✓'):(r&&r.programado||prog?'Programado ✓':(r&&r.cuotas>1?'Registrado en '+r.cuotas+' cuotas de '+fm(r.cuota,moneda)+' ✓':'Registrado ✓')));if(nombreOtro&&modoOtro==='devuelve')cargar(true)}).catch(()=>{});
+    const rec=clase==='gasto'&&!prog&&chk('mRec');
+    hacer(e.currentTarget,async()=>{const r=await api(nombreOtro?'compraParaOtro':(dividir?'registrarDividido':'registrar'),datos);
+      if(rec){const f=pd(val('mFecha'))||new Date();try{await api('guardarRecurrente',{token:T+'r',descripcion:val('mDesc').trim()||val('mSub')||val('mCat')||'Suscripción',tipo:'Gasto',monto:val('mMonto'),moneda,dia:f.getDate(),categoria:val('mCat'),subcategoria:val('mSub'),cuentaId:medio==='Tarjeta'?'':cuentaId,ultima:val('mFecha')})}catch(x){toast('Se registró el gasto, pero no pude programar la repetición: '+x.message,true)}}
+      return r},null).then(r=>{if(rec)setTimeout(()=>toast('Registrado y se repetirá cada mes ✓'),1200);cerrarSheet();if(dividir&&r&&r.personas){toast('Dividido: tu parte '+fm(r.yo,moneda)+' · te deben '+fm(r.total-r.yo,moneda)+' ✓');if(S.tab==='movs')cargarMovs(true);return}toast(nombreOtro?(modoOtro==='devuelve'?'Anotado: '+nombreOtro+' te debe '+fm(Number(String(datos.monto).replace(',','.')),moneda)+' ✓':'Registrado como regalo ✓'):(r&&r.programado||prog?'Programado ✓':(r&&r.cuotas>1?'Registrado en '+r.cuotas+' cuotas de '+fm(r.cuota,moneda)+' ✓':'Registrado ✓')));if(nombreOtro&&modoOtro==='devuelve')cargar(true)}).catch(()=>{});
   });
   if(pre&&pre.tipoGasto){const bt=document.querySelector('#sgTipo button[data-v="'+pre.tipoGasto+'"]');if(bt)bt.click()}
   if(pre&&pre.otro)$('#mOtroL').click();
@@ -1824,7 +1830,7 @@ function repartoUI(boxId,linkId,moneda,idMonto,idCuenta){
 }
 function formCobroPersona(nombre,moneda,total){
   const T=tok();
-  abrirSheet('Cobro a '+nombre,'<div class="note">Te debe <b style="color:var(--tx)">'+fm(total,moneda)+'</b>. Se aplica primero a lo más antiguo.</div><label>¿Cuánto te pagó?</label><input id="cbM" inputmode="decimal" value="'+total+'" style="font-size:24px;font-weight:800"><label>Llega a</label><select id="cbC">'+cuentaOpts(cuentasPor(moneda),'')+'</select><div id="cbR"></div><a id="cbRL" class="mut" style="display:inline-block;font-size:13px;margin-top:8px;cursor:pointer">+ Me pagó en varias cuentas</a><label>Fecha</label><input id="cbF" type="date" value="'+hoyISO()+'"><div class="btns"><button class="btn sec" id="cbB">Volver</button><button class="btn" id="cbOk">Registrar cobro</button></div>');
+  abrirSheet('Cobro a '+nombre,'<div class="note">Te debe <b style="color:var(--tx)">'+fm(total,moneda)+'</b>. Se aplica primero a lo más antiguo.</div><label>¿Cuánto te pagó?</label><input id="cbM" inputmode="decimal" value="'+total+'" style="font-size:24px;font-weight:800"><label>Llega a</label><select id="cbC">'+cuentaOpts(cuentasPor(moneda),'')+'</select><div id="cbR"></div><button type="button" id="cbRL" style="background:none;border:0;padding:10px 0;font:inherit;font-size:14px;color:var(--ac);cursor:pointer;-webkit-tap-highlight-color:transparent">+ Me pagó en varias cuentas</button><label>Fecha</label><input id="cbF" type="date" value="'+hoyISO()+'"><div class="btns"><button class="btn sec" id="cbB">Volver</button><button class="btn" id="cbOk">Registrar cobro</button></div>');
   bind('cbB',()=>sPrestamos('deben'));
   const rp=repartoUI('cbR','cbRL',moneda,'cbM','cbC');
   bind('cbOk',e=>hacer(e.currentTarget,()=>{const partes=rp.partes();return api('cobrarPersona',{token:T,persona:nombre,moneda,monto:val('cbM'),cuentaId:val('cbC'),fecha:val('cbF'),partes:partes||undefined})},'Cobro registrado ✓').then(()=>{cargar(true);sPrestamos('deben')}).catch(()=>{}));
@@ -1860,7 +1866,7 @@ async function accionPrestamo(p){
   let pagos=[];try{pagos=await api('prestamoPagos',{id:p.id})}catch(e){}
   let h='<div class="note">Saldo pendiente: <b style="color:var(--tx)">'+fm(p.saldo,p.moneda)+'</b> de '+fm(p.monto,p.moneda)+(p.tasa>0?' · interés mensual esperado '+fm(p.interesMensual,p.moneda):' · sin interés')+'.</div>';
   if(p.estado!=='Pagado'){
-    h+='<label>Monto recibido</label><input id="apM" inputmode="decimal" value="'+(p.tasa>0?p.interesMensual:p.saldo)+'"><label>Llega a</label><select id="apC">'+cuentaOpts(cuentasPor(p.moneda),'')+'</select><div id="apR"></div><a id="apRL" class="mut" style="display:inline-block;font-size:13px;margin-top:8px;cursor:pointer">+ Me pagó en varias cuentas</a><label>Fecha</label><input id="apF" type="date" value="'+hoyISO()+'">'
+    h+='<label>Monto recibido</label><input id="apM" inputmode="decimal" value="'+(p.tasa>0?p.interesMensual:p.saldo)+'"><label>Llega a</label><select id="apC">'+cuentaOpts(cuentasPor(p.moneda),'')+'</select><div id="apR"></div><button type="button" id="apRL" style="background:none;border:0;padding:10px 0;font:inherit;font-size:14px;color:var(--ac);cursor:pointer;-webkit-tap-highlight-color:transparent">+ Me pagó en varias cuentas</button><label>Fecha</label><input id="apF" type="date" value="'+hoyISO()+'">'
      +'<div class="two"><button class="btn" id="apK">Es capital (me devolvió)</button><button class="btn sec" id="apI">Es interés</button></div>';
   }
   h+='<div class="bn" style="margin:14px 0 4px">Historial</div>'+(pagos.length?pagos.map(filaMov).join(''):'<div class="empty">Aún sin movimientos.</div>')
