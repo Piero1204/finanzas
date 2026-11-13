@@ -7599,13 +7599,17 @@ function apiHttp_(e) {
 function api_versionHoja() {
   const ss = getSS_();
   let t = 0;
-  try { t = DriveApp.getFileById(ss.getId()).getLastUpdated().getTime(); } catch (e) { /* sin permiso de Drive: queda solo la cuenta de filas */ }
-  let filas = 0;
-  ['Movimientos', 'Programados', 'Cuentas'].forEach(function (n) {
+  try { t = DriveApp.getFileById(ss.getId()).getLastUpdated().getTime(); } catch (e) { /* sin permiso de Drive */ }
+  // filas de todas las pestañas de datos + los saldos de las cuentas: cualquier cambio (app, Telegram, correo o a mano) cambia la huella
+  const partes = [t];
+  HOJAS_LOCAL_RESPALDO_.forEach(function (n) { const h = ss.getSheetByName(n); partes.push(h ? h.getLastRow() + 'x' + h.getLastColumn() : 0); });
+  ['Cuentas', 'TarjetaCredito', 'PrestamosOtorgados', 'Programados'].forEach(function (n) {
     const h = ss.getSheetByName(n);
-    if (h) filas += h.getLastRow();
+    if (h && h.getLastRow() > 1) partes.push(JSON.stringify(h.getRange(Math.max(2, h.getLastRow() - 60), 1, Math.min(h.getLastRow() - 1, 61), h.getLastColumn()).getValues()));
   });
-  return t + '-' + filas;
+  const m = ss.getSheetByName('Movimientos');
+  if (m && m.getLastRow() > 1) partes.push(JSON.stringify(m.getRange(Math.max(2, m.getLastRow() - 30), 1, Math.min(m.getLastRow() - 1, 31), m.getLastColumn()).getValues()));
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, partes.join('|')).map(function (b) { return ('0' + (b & 255).toString(16)).slice(-2); }).join('');
 }
 
 /* ==== 32_InstalarCliente.gs ==== */
@@ -7765,8 +7769,7 @@ function marcarCorreoProcesado_(id) {
 function revisarCorreosBancarios() {
   if (!iaProveedor_()) return;
   const desde = Number(prop_('CORREO_DESDE') || 0);
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(5000)) return;
+  // sin bloquear el script entero: así la app y Telegram pueden escribir mientras se revisa el correo
   try {
     const etiqueta = GmailApp.getUserLabelByName(CORREO_ETIQUETA_) || GmailApp.createLabel(CORREO_ETIQUETA_);
     const q = 'from:(' + CORREO_REMITENTES_.join(' OR ') + ') newer_than:3d -label:' + CORREO_ETIQUETA_.replace('/', '-');
@@ -7776,13 +7779,13 @@ function revisarCorreosBancarios() {
       h.getMessages().forEach(function (m) {
         const id = m.getId();
         if (correoYaProcesado_(id) || m.getDate().getTime() < desde || usadas >= 8) return;
+        marcarCorreoProcesado_(id); // se marca antes: si dos revisiones se cruzan, ninguna lo procesa dos veces
         try { if (procesarCorreoBancario_(m)) usadas++; }
         catch (e) { registrarLog_('ERROR Correo', m.getSubject() + ': ' + e.message); }
-        marcarCorreoProcesado_(id);
       });
       if (h.getMessages().every(function (m) { return correoYaProcesado_(m.getId()); })) h.addLabel(etiqueta);
     });
-  } finally { lock.releaseLock(); }
+  } catch (e) { registrarLog_('ERROR Correo', e.message); }
 }
 
 /** Limpia el cuerpo: quita líneas legales y espacios para que la IA lea solo lo importante */
