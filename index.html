@@ -18,7 +18,7 @@
 <script src="jspdf.umd.min.js"></script>
 <script src="jspdf.plugin.autotable.min.js"></script>
 <script>(function(){
-window.LOCAL_MODE=true;window.APP_VER='20261111-1353';
+window.LOCAL_MODE=true;window.APP_VER='20261112-1900';
 let w=null,n=0;const pend={};
 try{
   w=new Worker('worker.js?v='+window.APP_VER);
@@ -2114,7 +2114,7 @@ const api0=api;
 api=function(n,a){return api0(n,a).then(r=>{if(ESCRIBE.test(n))hEncolar(n,a);return r})};
 function cuandoTxt(k){const t=Number(localStorage.getItem(k)||0);return t?new Date(t).toLocaleString('es-PE',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'nunca'}
 const cargar0=cargar;
-cargar=async function(s){await cargar0(s);if(!cargar.vez){cargar.vez=1;hAlAbrir();avisarAlAbrir()}};
+cargar=async function(s){await cargar0(s);if(!s)hAlAbrir();if(!cargar.vez){cargar.vez=1;avisarAlAbrir()}};
 /* La bolsa necesita salir a internet: con tu hoja conectada la consulta tu propio script; sin ella, solo si configuraste un proxy propio */
 const BOLSA_HOJA=/^(ideasAcciones|historialPortafolio|inversiones|dividendosSugeridos|resumenInversiones)$/;
 const api1=api;api=function(n,a){if(hOn()&&BOLSA_HOJA.test(n))return hLlamar(n,a);return api1(n,a)};
@@ -2199,7 +2199,7 @@ async function hSincronizar(manual){
   finally{H.flush=false}
 }
 function hAlAbrir(){if(hOn())hSincronizar()}
-setInterval(()=>{if(hOn()&&!document.hidden&&TOKEN&&!sheetOn())hSincronizar()},90000);
+setInterval(()=>{if(hOn()&&!document.hidden&&TOKEN&&!sheetOn())hSincronizar()},60000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden&&hOn()&&TOKEN)hSincronizar()});
 window.addEventListener('online',()=>{if(hOn())hSincronizar()});
 function genClave(){const a=new Uint8Array(12);crypto.getRandomValues(a);return Array.from(a,x=>'abcdefghjkmnpqrstuvwxyz23456789'[x%31]).join('')}

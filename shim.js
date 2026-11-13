@@ -137,6 +137,8 @@
   // ---------- Utilities ----------
   const p2 = function (n) { return String(n).padStart(2, '0'); };
   G.Utilities = {
+    DigestAlgorithm: { MD5: 'MD5', SHA_256: 'SHA_256' },
+    computeDigest: function (alg, v) { const t = String(v); const out = []; let h = 2166136261; for (let k = 0; k < 16; k++) { for (let i = 0; i < t.length; i++) { h ^= t.charCodeAt(i) + k; h = Math.imul(h, 16777619); } out.push(((h >>> 0) & 255) - 128); } return out; },
     getUuid: function () { return (self.crypto && self.crypto.randomUUID) ? self.crypto.randomUUID() : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function (c) { const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16); }); },
     sleep: function () {},
     formatDate: function (d, tz, f) {
