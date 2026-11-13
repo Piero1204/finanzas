@@ -19,7 +19,7 @@
 <script src="jspdf.umd.min.js"></script>
 <script src="jspdf.plugin.autotable.min.js"></script>
 <script>(function(){
-window.LOCAL_MODE=true;window.APP_VER='20261110-1400';
+window.LOCAL_MODE=true;window.APP_VER='20261113-1200';
 let w=null,n=0;const pend={};
 try{
   w=new Worker('worker.js?v='+window.APP_VER);
@@ -2248,9 +2248,11 @@ function sHojaOn(){
     +(n?'<div class="note warn">'+n+' cambio'+(n===1?'':'s')+' por enviar a tu hoja'+(localStorage.getItem('hRed')?' (sin conexión; se reintenta solo)':'')+'.</div>':'')
     +(err?'<div class="note warn">'+esc(err)+'</div>':'')
     +'<div class="bn" style="margin:14px 0 2px">Telegram (opcional)</div><div class="note">Registra gastos escribiéndole a tu propio bot. 1) En Telegram habla con <b>@BotFather</b> → /newbot y copia el token. 2) Habla con <b>@userinfobot</b> para ver tu ID. Si tienes clave de IA (Más → Inteligencia artificial), el bot entiende frases como «gasté 25 en almuerzo».</div><input id="tgT" placeholder="Token del bot" autocapitalize="off" autocorrect="off" spellcheck="false"><input id="tgC" inputmode="numeric" placeholder="Tu ID de chat (números)" style="margin-top:8px"><button class="btn sec" id="tgOk">Conectar Telegram</button>'
+    +'<div class="bn" style="margin:14px 0 2px">Consumos desde tus correos (opcional)</div><div class="note">Cuando tu banco te envía el aviso de un consumo con tarjeta, tu hoja lo registra sola cada 5 minutos en la tarjeta que corresponde (solo bancos que tienes en Tarjetas). No registra pagos a la tarjeta, rechazos ni devoluciones. 1) Toca «Copiar código de correos». 2) En Apps Script de tu hoja toca <b>+ → Script</b>, llámalo <b>Correos</b> y pégalo. 3) Ejecuta <b>activarCorreosTarjetas</b> y acepta el permiso de Gmail. Lee el Gmail de la cuenta dueña de la hoja: si los avisos te llegan a otro correo, reenvíalos a esa cuenta con un filtro de Gmail. Por defecto se excluyen BBVA y Banca di Asti (cámbialo en la pestaña Ajustes, clave <b>correos.excluir</b>).</div><button class="btn sec" id="hCo" style="margin-top:0">Copiar código de correos</button>'
     +'<button class="btn" id="hSy">Sincronizar ahora</button><button class="btn sec" id="hEn">Copiar enlace para otro dispositivo</button><button class="btn sec" id="hOff">Desconectar</button>'
     +'<div class="bn">El enlace para otro dispositivo incluye tu clave de conexión: pégalo en «Conectar con mi hoja» del otro teléfono. No lo compartas con nadie.</div>');
   bind('tgOk',async e=>{const b=e.currentTarget;b.disabled=true;try{await hLlamar('guardarTelegram',{token:val('tgT'),chatId:val('tgC'),url:localStorage.getItem('hUrl')});toast('Telegram conectado ✓ Escríbele /ayuda a tu bot');$('#tgT').value=''}catch(x){toast(/desconocida/i.test(x.message)?'Tu script es antiguo: copia el código de nuevo y vuelve a implementar.':x.message,true)}b.disabled=false});
+  bind('hCo',async e=>{const b=e.currentTarget;b.disabled=true;try{const r=await fetch('codigo-correos.gs',{cache:'no-cache'});if(!r.ok)throw new Error('No pude leer el código (falta codigo-correos.gs en la app).');if(await copiarTexto(await r.text()))toast('Código copiado ✓ Pégalo como archivo nuevo en Apps Script');else throw new Error('Tu navegador no permitió copiar.')}catch(x){toast(x.message,true)}b.disabled=false});
   bind('hSy',e=>{e.currentTarget.disabled=true;hSincronizar(true).then(()=>sHoja())});
   bind('hEn',async()=>{const t=localStorage.getItem('hUrl')+'#'+localStorage.getItem('hPin');if(await copiarTexto(t))toast('Enlace copiado ✓');else toast('No pude copiar.',true)});
   bind('hOff',()=>{if(!confirm('¿Desconectar de tu hoja? Esta app se queda con los datos que tiene ahora y vuelve a funcionar sola.'))return;['hOn','hUrl','hPin','hTok','hTokExp','hCola','hVer','hErr','hRed','hUlt'].forEach(k=>localStorage.removeItem(k));pintarTabs();toast('Desconectada');cerrarSheet()})

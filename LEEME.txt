@@ -11,7 +11,7 @@ su propia hoja de Google (opcional) y su propia clave de IA (opcional).
 GitHub Pages: sube TODO el contenido de esta carpeta a un repositorio público,
 Settings > Pages > Deploy from a branch > main / (root). El enlace queda como https://USUARIO.github.io/REPO/
 
-Al actualizar, sube SIEMPRE juntos index.html, gs-bundle.js, worker.js, shim.js, prelude.js, sw.js y codigo-hoja.gs.
+Al actualizar, sube SIEMPRE juntos index.html, gs-bundle.js, worker.js, shim.js, prelude.js, sw.js, codigo-hoja.gs y codigo-correos.gs.
 Si alguna pieza queda de otra versión, la app lo detecta, se repara sola una vez y, si sigue mal, dice qué falta.
 
 ─────────────────────────────────────────
@@ -42,6 +42,17 @@ para que el bot de Telegram entienda frases como "gasté 25 en almuerzo".
 5. TELEGRAM (opcional, requiere la hoja)
 ─────────────────────────────────────────
 Más > Mi hoja > Telegram: crea tu bot con @BotFather, consulta tu ID con @userinfobot, pega ambos y toca Conectar.
+
+─────────────────────────────────────────
+5b. CONSUMOS DESDE TUS CORREOS (opcional, requiere la hoja)
+─────────────────────────────────────────
+Más > Mi hoja > "Copiar código de correos". En Apps Script de tu hoja: + > Script, llámalo "Correos", pega y guarda.
+Ejecuta una vez activarCorreosTarjetas (pide permiso para leer Gmail). Desde entonces, cada 5 minutos la hoja lee
+los avisos de consumo de tus tarjetas (solo bancos que tienes en la pestaña Tarjetas) y los registra; la app los baja sola.
+- Lee el Gmail de la cuenta DUEÑA de la hoja. Si los avisos llegan a otra cuenta, reenvíalos con un filtro de Gmail.
+- Excluye BBVA y Banca di Asti por defecto (pestaña Ajustes, clave correos.excluir, separados por comas).
+- probarCorreosTarjetas muestra qué haría con tus últimos correos, sin registrar nada.
+- La pestaña "Correos" anota cada aviso leído y qué se hizo con él. desactivarCorreosTarjetas lo apaga.
 
 ─────────────────────────────────────────
 6. BOLSA
